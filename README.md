@@ -29,11 +29,6 @@ scheduled-review --now --db-migration --api-contract --error-handling --resource
 # 6. 安装定时任务（工作日每天 9:00 自动审查 + 飞书通知）
 scheduled-review --install --time 09:00 --days 1-5 \
   --notify feishu --webhook "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
-
-# 7. 启动可视化 Web 面板（浏览器中点选执行）
-dashboard              # 一键启动，自动检测 Node.js/Python
-cra --dashboard        # 或安装 CLI 后
-# 打开浏览器访问 http://localhost:8080
 ```
 
 ---
@@ -111,30 +106,6 @@ scheduled-review --install --time 09:00 --days 1-5
 
 ---
 
-## Dashboard / 可视化面板
-
-通过网页界面选择脚本、配置参数、实时运行并查看结果。
-
-```bash
-# 方式 1: CLI 命令（安装后）
-cra --dashboard          # 默认端口 8080
-cra --dashboard 9000     # 指定端口
-
-# 方式 2: 一键启动（自动检测 Node.js / Python）
-bash dashboard/launcher.sh
-
-# 方式 3: npm
-cd dashboard && npm start
-```
-
-打开浏览器访问 `http://localhost:8080`
-
-**特性：** 脚本分类浏览 · 参数可视化配置 · SSE 实时流式输出 · 执行历史记录 · 深色主题
-
-详细说明见 [dashboard/README.md](dashboard/README.md)
-
----
-
 ## Multi-Platform Support / 多平台支持
 
 | Platform | Integration | How AI Uses It |
@@ -195,14 +166,7 @@ code-review-assistant/
 │   ├── tencent-coding.yml      # 腾讯云 CODING
 │   ├── azure-pipelines.yml     # Azure DevOps
 │   └── Jenkinsfile             # Jenkins
-├── dashboard/                  # Web Dashboard / 可视化执行面板
-│   ├── server.js               # Node.js backend (recommended)
-│   ├── server.py               # Python backend (fallback)
-│   ├── launcher.sh             # Auto-detect launcher
-│   ├── index.html              # Web UI
-│   └── static/
-│       ├── style.css           # GitHub Dark theme
-│       └── app.js              # Frontend logic
+├── dashboard/                  # Web Dashboard (optional local runner) / 可视化执行面板（可选本地运行器）
 ├── docs/
 │   └── platform-adapters.md    # Multi-cloud platform guide / 多云平台适配指南
 └── scripts/                    # 40 review scripts + 8 notifiers
