@@ -1,0 +1,199 @@
+name: Code Review Assistant
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      severity:
+        description: 'Review severity level'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - critical
+          - high
+          - medium
+          - all
+      fix_mode:
+        description: 'Auto-apply safe fixes'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  code-review:
+    name: Automated Code Review
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup environment
+        run: |
+          echo "REPO_DIR=$(pwd)" >> $GITHUB_ENV
+          echo "SEVERITY=${{ github.event.inputs.severity || 'all' }}" >> $GITHUB_ENV
+          echo "FIX_MODE=${{ github.event.inputs.fix_mode || 'false' }}" >> $GITHUB_ENV
+
+      - name: Install GitHub CLI
+        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          apt-get update && apt-get install -y gh
+
+      - name: Authenticate GitHub CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      # ===== Phase 1: Secret Scanning (always run) =====
+      - name: Scan for secrets
+        id: secrets
+        run: |
+          bash scripts/scan-secrets.sh "$REPO_DIR" critical > secrets_output.txt 2>&1 || true
+          echo "SECRETS_EXIT=$?" >> $GITHUB_ENV
+        continue-on-error: true
+
+      # ===== Phase 2: Dependency Vulnerability Scan =====
+      - name: Scan dependencies
+        id: deps
+        run: |
+          bash scripts/scan-deps.sh "$REPO_DIR" > deps_output.txt 2>&1 || true
+          echo "DEPS_EXIT=$?" >> $GITHUB_ENV
+        continue-on-error: true
+
+      # ===== Phase 3: Code Quality Checks (severity-based) =====
+      - name: Run code smell detection
+        id: smell
+        run: |
+          bash scripts/code-smell.sh "$REPO_DIR" > smell_output.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Run naming convention check
+        id: naming
+        run: |
+          bash scripts/naming-convention.sh "$REPO_DIR" > naming_output.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Run lint check
+        id: lint
+        run: |
+          bash scripts/lint-check.sh "$REPO_DIR" > lint_output.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Run security checks
+        id: security
+        run: |
+          bash scripts/pii-scan.sh "$REPO_DIR" > pii_output.txt 2>&1 || true
+          bash scripts/supply-chain.sh "$REPO_DIR" > supply_output.txt 2>&1 || true
+        continue-on-error: true
+
+      # ===== Phase 4: Severity Gate =====
+      - name: Calculate severity score
+        id: severity_gate
+        run: |
+          bash scripts/severity-gate.sh "$REPO_DIR" "$SEVERITY" > gate_output.txt 2>&1 || true
+          echo "GATE_EXIT=$?" >> $GITHUB_ENV
+          echo "GATE_OUTPUT<<EOF" >> $GITHUB_ENV
+          cat gate_output.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+        continue-on-error: true
+
+      # ===== Phase 5: Auto-Fix (if enabled) =====
+      - name: Apply safe fixes
+        if: env.FIX_MODE == 'true'
+        id: autofix
+        run: |
+          bash scripts/auto-fix.sh "$REPO_DIR" --apply > autofix_output.txt 2>&1 || true
+          if [[ -f .autofix_applied ]]; then
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git add -A
+            git diff --cached --quiet || git commit -m "chore: apply auto-fixes from code-review-assistant"
+            git push
+          fi
+        continue-on-error: true
+
+      # ===== Phase 6: Collect and post PR comment =====
+      - name: Generate review report
+        id: report
+        run: |
+          REPORT_FILE="review_report.md"
+          echo "## Code Review Assistant Report" > "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+          echo "**Severity Level:** \`$SEVERITY\` | **Auto-Fix:** \`$FIX_MODE\`" >> "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+
+          # Severity gate result
+          if [[ "$GATE_EXIT" == "0" ]]; then
+            echo "### Quality Gate: ✅ PASSED" >> "$REPORT_FILE"
+          else
+            echo "### Quality Gate: ❌ FAILED" >> "$REPORT_FILE"
+          fi
+          echo "" >> "$REPORT_FILE"
+          echo "<details><summary>View Severity Score Details</summary>" >> "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+          echo "\`\`\`" >> "$REPORT_FILE"
+          cat gate_output.txt >> "$REPORT_FILE"
+          echo "\`\`\`" >> "$REPORT_FILE"
+          echo "</details>" >> "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+
+          # Individual checks
+          for check in secrets deps smell naming lint; do
+            output_file="${check}_output.txt"
+            if [[ -f "$output_file" && -s "$output_file" ]]; then
+              has_issues=$(grep -cE "🔴|🟡|❌|警告|风险" "$output_file" || true)
+              if [[ "$has_issues" -gt 0 ]]; then
+                echo "### ⚠️ ${check^^} Issues Found" >> "$REPORT_FILE"
+                echo "<details><summary>View Details</summary>" >> "$REPORT_FILE"
+                echo "" >> "$REPORT_FILE"
+                echo "\`\`\`" >> "$REPORT_FILE"
+                cat "$output_file" >> "$REPORT_FILE"
+                echo "\`\`\`" >> "$REPORT_FILE"
+                echo "</details>" >> "$REPORT_FILE"
+                echo "" >> "$REPORT_FILE"
+              fi
+            fi
+          done
+
+          # Auto-fix summary
+          if [[ "$FIX_MODE" == "true" && -f autofix_output.txt ]]; then
+            echo "### 🤖 Auto-Fix Summary" >> "$REPORT_FILE"
+            echo "<details><summary>View Changes</summary>" >> "$REPORT_FILE"
+            echo "" >> "$REPORT_FILE"
+            echo "\`\`\`" >> "$REPORT_FILE"
+            cat autofix_output.txt >> "$REPORT_FILE"
+            echo "\`\`\`" >> "$REPORT_FILE"
+            echo "</details>" >> "$REPORT_FILE"
+            echo "" >> "$REPORT_FILE"
+          fi
+
+          echo "---" >> "$REPORT_FILE"
+          echo "_Powered by [Code Review Assistant](https://github.com/wzm111/code-review-assistant)_" >> "$REPORT_FILE"
+
+          cat "$REPORT_FILE"
+
+      - name: Post PR comment
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file review_report.md
+        continue-on-error: true
+
+      # ===== Phase 7: Check annotations =====
+      - name: Annotate with check results
+        run: |
+          echo "::group::Review Results"
+          cat review_report.md
+          echo "::endgroup::"
+
+          # Fail the job if gate failed
+          if [[ "$GATE_EXIT" != "0" ]]; then
+            echo "::error::Quality gate failed. Please address the issues above."
+            exit 1
+          fi

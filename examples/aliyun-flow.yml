@@ -1,0 +1,189 @@
+# 阿里云效 Flow 流水线配置
+# 使用方式：复制此文件到代码库根目录，重命名为 .aliyun/pipelines.yml
+#
+# 前置条件：
+# 1. 代码库托管在阿里云效 CodeUp
+# 2. 流水线已开启 MR（合并请求）触发
+# 3. 如需评论到 MR，需在流水线环境变量中配置 CODEUP_TOKEN
+#
+# 变量说明：
+#   SEVERITY    - 门禁阈值: critical(仅致命) / high(高+致命) / medium(中+高+致命) / all
+#   FIX_MODE    - 是否自动修复: true / false（建议私有仓库才开启）
+#   CODEUP_TOKEN - CodeUp 个人访问令牌（用于 MR 评论，可选）
+
+version: 1.0
+name: code-review-assistant
+trigger:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+      - "release/*"
+  merge_request:
+    action:
+      - open        # MR 创建时触发
+      - update      # MR 更新时触发（推送新提交）
+      - reopen      # MR 重新打开时触发
+
+# 环境变量（在阿里云效流水线设置中配置）
+env:
+  SEVERITY: "${SEVERITY:-high}"      # 默认 high 级别门禁
+  FIX_MODE: "${FIX_MODE:-false}"     # 默认不自动修复
+
+stages:
+  review:
+    name: "代码审查"
+    jobs:
+      security-scan:
+        name: "安全扫描"
+        runsOn: docker
+        steps:
+          - checkout: self
+            with:
+              depth: 50                # 保留最近 50 次提交，用于增量分析
+
+          - script:
+              name: "安装依赖工具"
+              script: |
+                # 阿里云效默认镜像基于 Ubuntu，安装 git 和 perl（脱敏需要）
+                apt-get update -qq && apt-get install -y -qq git perl curl
+
+          - script:
+              name: "拉取审查工具"
+              script: |
+                # --depth 1 只拉取最新版，不拉历史，节省时间和空间
+                # 如果无网络，改用 git submodule 或把 scripts/ 复制到仓库
+                git clone --depth 1 https://github.com/wzm111/code-review-assistant.git /tmp/cra
+
+          - script:
+              name: "密钥扫描（已脱敏）"
+              script: |
+                echo "=========================================="
+                echo "🔐 开始密钥扫描（严重级别: critical）"
+                echo "=========================================="
+                bash /tmp/cra/scripts/scan-secrets.sh . critical > /tmp/secrets.txt 2>&1 || true
+                cat /tmp/secrets.txt
+                # 统计发现数量
+                SECRET_COUNT=$(grep -c "🔴\|🟠\|🟡" /tmp/secrets.txt 2>/dev/null || echo "0")
+                echo "发现密钥问题: ${SECRET_COUNT} 处"
+
+          - script:
+              name: "依赖漏洞扫描"
+              script: |
+                echo "=========================================="
+                echo "📦 开始依赖漏洞扫描"
+                echo "=========================================="
+                bash /tmp/cra/scripts/scan-deps.sh . > /tmp/deps.txt 2>&1 || true
+                cat /tmp/deps.txt
+
+      quality-check:
+        name: "代码质量检查"
+        runsOn: docker
+        steps:
+          - checkout: self
+            with:
+              depth: 50
+
+          - script:
+              name: "拉取审查工具"
+              script: |
+                git clone --depth 1 https://github.com/wzm111/code-review-assistant.git /tmp/cra
+
+          - script:
+              name: "代码异味检测"
+              script: |
+                echo "=========================================="
+                echo "👃 代码异味检测"
+                echo "=========================================="
+                bash /tmp/cra/scripts/code-smell.sh . > /tmp/smell.txt 2>&1 || true
+                cat /tmp/smell.txt
+
+          - script:
+              name: "命名规范检查"
+              script: |
+                echo "=========================================="
+                echo "📝 命名规范检查"
+                echo "=========================================="
+                bash /tmp/cra/scripts/naming-convention.sh . > /tmp/naming.txt 2>&1 || true
+                cat /tmp/naming.txt
+
+          - script:
+              name: "代码规范检查"
+              script: |
+                echo "=========================================="
+                echo "📏 代码规范检查（Lint）"
+                echo "=========================================="
+                bash /tmp/cra/scripts/lint-check.sh . > /tmp/lint.txt 2>&1 || true
+                cat /tmp/lint.txt
+
+      severity-gate:
+        name: "质量门禁"
+        runsOn: docker
+        steps:
+          - checkout: self
+            with:
+              depth: 50
+
+          - script:
+              name: "拉取审查工具"
+              script: |
+                git clone --depth 1 https://github.com/wzm111/code-review-assistant.git /tmp/cra
+
+          - script:
+              name: "执行质量门禁"
+              script: |
+                echo "=========================================="
+                echo "🚦 质量门禁（阈值: ${SEVERITY}）"
+                echo "=========================================="
+                if bash /tmp/cra/scripts/severity-gate.sh . "$SEVERITY"; then
+                  echo "✅ 质量门禁通过"
+                else
+                  echo "❌ 质量门禁未通过，请修复上述问题"
+                  exit 1
+                fi
+
+          - script:
+              name: "汇总报告"
+              script: |
+                echo "=========================================="
+                echo "📊 审查汇总报告"
+                echo "=========================================="
+                REPORT_FILE="/tmp/report.md"
+                echo "## 代码审查报告" > "$REPORT_FILE"
+                echo "" >> "$REPORT_FILE"
+                echo "**触发方式:** 阿里云效 Flow | **门禁级别:** \`${SEVERITY}\`" >> "$REPORT_FILE"
+                echo "" >> "$REPORT_FILE"
+
+                for f in /tmp/secrets.txt /tmp/deps.txt /tmp/smell.txt /tmp/naming.txt /tmp/lint.txt; do
+                  if [ -s "$f" ]; then
+                    fname=$(basename "$f" .txt)
+                    echo "### ${fname}" >> "$REPORT_FILE"
+                    echo '```' >> "$REPORT_FILE"
+                    head -50 "$f" >> "$REPORT_FILE"
+                    echo '```' >> "$REPORT_FILE"
+                    echo "" >> "$REPORT_FILE"
+                  fi
+                done
+
+                cat "$REPORT_FILE"
+
+      # 可选：评论到 MR（需要配置 CODEUP_TOKEN）
+      post-comment:
+        name: "评论到 MR"
+        runsOn: docker
+        # 只有配置了 CODEUP_TOKEN 才执行
+        if: "${CODEUP_TOKEN} != ''"
+        steps:
+          - script:
+              name: "发送 MR 评论"
+              script: |
+                if [ -f /tmp/report.md ] && [ -n "${CI_MERGE_REQUEST_IID}" ]; then
+                  REPORT=$(cat /tmp/report.md | sed 's/"/\\"/g' | tr '\n' ' ')
+                  curl -s -X POST \
+                    "https://devops.aliyun.com/api/v4/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes" \
+                    -H "PRIVATE-TOKEN: ${CODEUP_TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"body\":\"${REPORT}\"}" || true
+                  echo "✅ MR 评论已发送"
+                fi

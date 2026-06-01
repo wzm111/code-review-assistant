@@ -1,0 +1,25 @@
+{
+  "name": "code-review-assistant-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for Code Review Assistant - Universal AI integration",
+  "main": "server.js",
+  "bin": {
+    "cra-mcp": "./server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "inspect": "npx @modelcontextprotocol/inspector node server.js"
+  },
+  "keywords": [
+    "mcp",
+    "code-review",
+    "security",
+    "lint",
+    "ai-tools"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  }
+}

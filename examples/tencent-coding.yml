@@ -1,0 +1,186 @@
+# 腾讯云 CODING CI 配置
+# 使用方式：复制此文件到代码库根目录，重命名为 ci.yml
+#
+# 前置条件：
+# 1. 代码库托管在腾讯云 CODING
+# 2. 已开启 MR 触发构建计划
+# 3. 如需评论到 MR，需在项目设置中配置 CODING_TOKEN 环境变量
+#
+# 变量说明（在 CODING 项目设置 → 持续集成 → 环境变量中配置）：
+#   SEVERITY     - 门禁阈值: critical / high / medium / all
+#   FIX_MODE     - 是否自动修复: true / false
+#   CODING_TOKEN - CODING 个人访问令牌（用于 MR 评论，可选）
+
+version: "2.0"
+
+stages:
+  - security      # 安全扫描
+  - quality       # 代码质量
+  - gate          # 质量门禁
+
+# 默认环境变量
+env:
+  SEVERITY: "${SEVERITY:-high}"
+  FIX_MODE: "${FIX_MODE:-false}"
+
+# ============================================================================
+# Stage 1: 安全扫描
+# ============================================================================
+security-scan:
+  stage: security
+  image: ubuntu:22.04
+  # 触发条件：MR 事件 或 Web 手动触发
+  rules:
+    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event'"
+    - if: "$CI_PIPELINE_SOURCE == 'web'"
+    - if: "$CI_PIPELINE_SOURCE == 'schedule'"
+
+  before_script:
+    # 安装必要依赖
+    - apt-get update -qq && apt-get install -y -qq git perl curl
+    # 拉取审查工具（--depth 1 节省时间和空间）
+    - git clone --depth 1 https://github.com/wzm111/code-review-assistant.git /tmp/cra
+
+  script:
+    # ---------- Secret 扫描 ----------
+    - |
+      echo "=========================================="
+      echo "🔐 密钥扫描（严重级别: critical）"
+      echo "=========================================="
+      bash /tmp/cra/scripts/scan-secrets.sh . critical > secrets.txt 2>&1 || true
+      cat secrets.txt
+      # 统计问题数
+      SECRET_COUNT=$(grep -c "🔴\|🟠\|🟡" secrets.txt 2>/dev/null || echo "0")
+      echo "发现密钥问题: ${SECRET_COUNT} 处"
+
+    # ---------- 依赖漏洞 ----------
+    - |
+      echo "=========================================="
+      echo "📦 依赖漏洞扫描"
+      echo "=========================================="
+      bash /tmp/cra/scripts/scan-deps.sh . > deps.txt 2>&1 || true
+      cat deps.txt
+
+  artifacts:
+    paths:
+      - secrets.txt
+      - deps.txt
+    expire_in: 3 days
+
+# ============================================================================
+# Stage 2: 代码质量检查
+# ============================================================================
+quality-check:
+  stage: quality
+  image: ubuntu:22.04
+  rules:
+    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event'"
+    - if: "$CI_PIPELINE_SOURCE == 'web'"
+    - if: "$CI_PIPELINE_SOURCE == 'schedule'"
+
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git perl curl
+    - git clone --depth 1 https://github.com/wzm111/code-review-assistant.git /tmp/cra
+
+  script:
+    # ---------- 代码异味 ----------
+    - |
+      echo "=========================================="
+      echo "👃 代码异味检测"
+      echo "=========================================="
+      bash /tmp/cra/scripts/code-smell.sh . > smell.txt 2>&1 || true
+      cat smell.txt
+
+    # ---------- 命名规范 ----------
+    - |
+      echo "=========================================="
+      echo "📝 命名规范检查"
+      echo "=========================================="
+      bash /tmp/cra/scripts/naming-convention.sh . > naming.txt 2>&1 || true
+      cat naming.txt
+
+    # ---------- 代码规范 ----------
+    - |
+      echo "=========================================="
+      echo "📏 代码规范检查（Lint）"
+      echo "=========================================="
+      bash /tmp/cra/scripts/lint-check.sh . > lint.txt 2>&1 || true
+      cat lint.txt
+
+  artifacts:
+    paths:
+      - smell.txt
+      - naming.txt
+      - lint.txt
+    expire_in: 3 days
+
+# ============================================================================
+# Stage 3: 质量门禁（失败会阻断流水线）
+# ============================================================================
+severity-gate:
+  stage: gate
+  image: ubuntu:22.04
+  rules:
+    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event'"
+    - if: "$CI_PIPELINE_SOURCE == 'web'"
+    - if: "$CI_PIPELINE_SOURCE == 'schedule'"
+
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git perl curl
+    - git clone --depth 1 https://github.com/wzm111/code-review-assistant.git /tmp/cra
+    # 下载之前 stage 的产物
+    - |
+      echo "=========================================="
+      echo "📊 质量门禁（阈值: ${SEVERITY}）"
+      echo "=========================================="
+
+  script:
+    # 执行门禁（失败则 exit 1，阻断合并）
+    - |
+      if bash /tmp/cra/scripts/severity-gate.sh . "$SEVERITY"; then
+        echo "✅ 质量门禁通过"
+      else
+        echo "❌ 质量门禁未通过"
+        exit 1
+      fi
+
+  # 门禁失败不允许跳过
+  allow_failure: false
+
+# ============================================================================
+# 可选：MR 评论（需要配置 CODING_TOKEN）
+# ============================================================================
+post-comment:
+  stage: gate
+  image: ubuntu:22.04
+  # 只有配置了 CODING_TOKEN 才执行
+  rules:
+    - if: "$CODING_TOKEN != null && $CI_MERGE_REQUEST_IID != null"
+
+  script:
+    - |
+      echo "=========================================="
+      echo "💬 发送 MR 评论"
+      echo "=========================================="
+
+      # 生成汇总报告
+      REPORT="## CODING 代码审查报告\n\n"
+      REPORT+="**触发方式:** MR \`${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}\` → \`${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}\`\n\n"
+      REPORT+="**门禁级别:** \`${SEVERITY}\`\n\n"
+
+      for f in secrets.txt deps.txt smell.txt naming.txt lint.txt; do
+        if [ -s "$f" ]; then
+          TITLE=$(echo "$f" | sed 's/.txt//')
+          CONTENT=$(head -30 "$f" | sed 's/"/\\"/g' | tr '\n' '\n')
+          REPORT+="### ${TITLE}\n\n\`\`\`\n${CONTENT}\n\`\`\`\n\n"
+        fi
+      done
+
+      # 调用 CODING API 评论
+      curl -s -X POST \
+        "https://${CI_SERVER_HOST}/api/v3/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes" \
+        -H "PRIVATE-TOKEN: ${CODING_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"body\":\"${REPORT}\"}" || true
+
+      echo "✅ MR 评论已发送"

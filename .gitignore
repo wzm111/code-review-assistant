@@ -1,0 +1,23 @@
+# 敏感配置
+.env
+.env.local
+.env.*.local
+
+# 临时文件
+.autofix_candidates
+*.tmp
+*.log
+
+# 生成报告
+.ai-review-report-*.md
+repo_review_*.markdown
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

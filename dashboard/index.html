@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Code Review Assistant Dashboard</title>
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">🔍</span>
+      <span>Code Review Assistant</span>
+    </div>
+    <nav>
+      <button class="nav-btn active" data-view="dashboard">⚡ 执行</button>
+      <button class="nav-btn" data-view="history">📜 历史</button>
+      <button class="nav-btn" data-view="schedule">⏰ 定时</button>
+    </nav>
+    <div class="version-badge" id="versionBadge">v--</div>
+  </header>
+
+  <main>
+    <!-- 左侧脚本列表面板 -->
+    <aside class="script-panel" id="scriptPanel">
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="🔍 搜索脚本..." autocomplete="off">
+      </div>
+      <div class="severity-filter" id="severityFilter">
+        <button class="severity-btn active" data-severity="all">全部</button>
+        <button class="severity-btn" data-severity="critical">🔴 5星 (6项)</button>
+        <button class="severity-btn" data-severity="high">🟠 4星+ (14项)</button>
+        <button class="severity-btn" data-severity="medium">🟡 3星+ (23项)</button>
+      </div>
+      <div class="script-list" id="scriptList">
+        <!-- 动态填充 -->
+      </div>
+    </aside>
+
+    <!-- 右侧内容区 -->
+    <section class="content-area" id="contentArea">
+      <!-- Dashboard 视图 -->
+      <div class="dashboard-view" id="dashboardView">
+        <div class="config-panel" id="configPanel">
+          <h2>📋 <span id="selectedScriptName">请选择一个脚本</span></h2>
+          <p id="selectedScriptDesc" style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">从左侧列表选择一个要执行的审查脚本</p>
+          <div id="scriptArgs"></div>
+          <div class="actions">
+            <button class="btn btn-primary" id="runBtn" disabled>
+              ▶️ 运行脚本
+            </button>
+            <button class="btn btn-secondary" id="clearBtn">
+              🗑️ 清空输出
+            </button>
+          </div>
+
+          <!-- 通知配置 -->
+          <details class="notify-panel" id="notifyPanel">
+            <summary>🔔 执行完成后通知（可选）</summary>
+            <div class="notify-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label>通知渠道</label>
+                  <select id="notifyChannel">
+                    <option value="">关闭通知</option>
+                    <option value="feishu">📢 飞书</option>
+                    <option value="dingtalk">💬 钉钉</option>
+                    <option value="wecom">💼 企业微信</option>
+                    <option value="slack">💬 Slack</option>
+                    <option value="telegram">✈️ Telegram</option>
+                    <option value="line">📱 LINE</option>
+                    <option value="whatsapp">📞 WhatsApp</option>
+                    <option value="email">📧 邮件</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Webhook URL</label>
+                  <input type="text" id="notifyWebhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>密钥（钉钉等需要）</label>
+                  <input type="password" id="notifySecret" placeholder="可选">
+                </div>
+                <div class="form-group notify-save-group">
+                  <label>&nbsp;</label>
+                  <button class="btn btn-secondary" id="notifySaveBtn">💾 保存配置</button>
+                  <span id="notifySaveStatus" class="notify-status"></span>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <!-- Review Output Format 图例 -->
+        <div class="review-legend" id="reviewLegend">
+          <div class="legend-title">📋 Review Output Format / 审查输出格式</div>
+          <div class="legend-items">
+            <div class="legend-item critical"><span class="legend-icon">🔴</span><span class="legend-label">Critical / 严重</span><span class="legend-action">Must fix before merge / 合并前必须修复</span></div>
+            <div class="legend-item warning"><span class="legend-icon">🟡</span><span class="legend-label">Warning / 警告</span><span class="legend-action">Should address / 建议处理</span></div>
+            <div class="legend-item suggestion"><span class="legend-icon">💡</span><span class="legend-label">Suggestion / 建议</span><span class="legend-action">Nice-to-have / 可选优化</span></div>
+            <div class="legend-item positive"><span class="legend-icon">✅</span><span class="legend-label">Positive / 亮点</span><span class="legend-action">What was done well / 做得好的地方</span></div>
+          </div>
+        </div>
+
+        <!-- 三栏输出区 -->
+        <div class="output-panels" id="outputPanels">
+          <!-- 扫描过程 -->
+          <div class="output-panel" id="panelProcess">
+            <div class="panel-header">📋 扫描过程</div>
+            <div class="panel-body" id="terminalProcess"></div>
+          </div>
+          <!-- 扫描报告 -->
+          <div class="output-panel" id="panelResult">
+            <div class="panel-header">📋 扫描报告</div>
+            <div class="panel-body" id="terminalResult"></div>
+          </div>
+          <!-- 失败信息 -->
+          <div class="output-panel" id="panelFail">
+            <div class="panel-header">❌ 失败信息</div>
+            <div class="panel-body" id="terminalFail"></div>
+          </div>
+          <!-- 空状态 -->
+          <div class="empty-state" id="emptyState">
+            <div class="icon">📋</div>
+            <p>选择左侧脚本并点击「运行」开始审查</p>
+          </div>
+        </div>
+
+        <div class="status-bar" id="statusBar">
+          <div class="status-indicator">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">就绪</span>
+          </div>
+          <span id="statusDetail"></span>
+        </div>
+      </div>
+
+      <!-- 历史视图 -->
+      <div class="history-view" id="historyView" style="display: none;">
+        <h2>📜 执行历史</h2>
+        <table class="history-table" id="historyTable">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>脚本</th>
+              <th>状态</th>
+              <th>耗时</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody">
+            <!-- 动态填充 -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 定时任务视图 -->
+      <div class="schedule-view" id="scheduleView" style="display: none;">
+        <div class="schedule-panel">
+          <div class="schedule-header">
+            <h2>⏰ 定时任务</h2>
+            <button class="btn btn-primary" id="addScheduleBtn">➕ 新建任务</button>
+          </div>
+          <div class="schedule-list" id="scheduleList">
+            <div class="empty-state">
+              <div class="icon">⏰</div>
+              <p>暂无定时任务，点击「新建任务」创建一个</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="schedule-form-panel" id="scheduleFormPanel" style="display: none;">
+          <h3>📋 任务配置</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>任务名称</label>
+              <input type="text" id="scheduleName" placeholder="例如：每日安全扫描">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>执行模式</label>
+              <select id="scheduleMode">
+                <option value="severity">按严重级别</option>
+                <option value="scripts">指定脚本</option>
+              </select>
+            </div>
+            <div class="form-group" id="scheduleSeverityGroup">
+              <label>严重级别</label>
+              <select id="scheduleSeverity">
+                <option value="critical">5星 - 安全/隐私/并发/错误/泄露 (6项)</option>
+                <option value="high">4星+ - 包含规范/架构/命名 (14项)</option>
+                <option value="medium">3星+ - 包含测试/迁移/API (23项)</option>
+                <option value="all">全部</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" id="scheduleScriptsGroup" style="display: none;">
+            <div class="form-group">
+              <label>选择脚本（多选）</label>
+              <div class="schedule-script-select" id="scheduleScriptSelect"></div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>时间规则 (Cron)</label>
+              <input type="text" id="scheduleCron" placeholder="0 9 * * *" value="0 9 * * *">
+              <small class="cron-hint">分 时 日 月 周（示例: 0 9 * * 1-5 = 工作日9点，0 */6 * * * = 每6小时）</small>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="scheduleNotify">
+                <span>执行完成后发送通知</span>
+              </label>
+            </div>
+            <div class="form-group checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="scheduleEnabled" checked>
+                <span>启用任务</span>
+              </label>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" id="saveScheduleBtn">💾 保存</button>
+            <button class="btn btn-secondary" id="cancelScheduleBtn">取消</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 详情弹窗 -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">输出详情</h3>
+        <button class="close-btn" id="closeModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <pre id="modalContent"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="static/app.js"></script>
+</body>
+</html>

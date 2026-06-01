@@ -1,0 +1,278 @@
+// Jenkins 流水线配置
+// 使用方式：复制此文件到代码库根目录
+//
+// 前置条件：
+// 1. Jenkins 已安装 Pipeline 插件
+// 2. Jenkins 节点已安装 git、perl、curl
+// 3. 如需评论到 PR/MR，需安装对应的插件（GitHub/GitLab/Gitee）
+//
+// 参数说明（可在 Jenkins  job 配置中设置参数）：
+//   SEVERITY  - 门禁阈值: critical / high / medium / all（默认 high）
+//   FIX_MODE  - 是否自动修复: true / false（默认 false）
+//
+// 环境变量：
+//   在 Jenkins → Manage Jenkins → Configure System → Environment variables 中配置
+
+pipeline {
+    agent any
+
+    options {
+        // 保留最近 10 次构建记录
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        // 禁止并发构建（避免资源冲突）
+        disableConcurrentBuilds()
+        // 流水线超时 30 分钟
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    // 参数化构建（在 Jenkins UI 中可手动选择）
+    parameters {
+        choice(
+            name: 'SEVERITY',
+            choices: ['high', 'critical', 'medium', 'all'],
+            description: '质量门禁阈值'
+        )
+        booleanParam(
+            name: 'FIX_MODE',
+            defaultValue: false,
+            description: '是否自动应用安全修复（仅建议在私有仓库开启）'
+        )
+    }
+
+    environment {
+        // 使用参数默认值
+        SEVERITY = "${params.SEVERITY ?: 'high'}"
+        FIX_MODE = "${params.FIX_MODE ?: false}"
+        // 审查工具目录
+        CRA_DIR = "/tmp/cra"
+    }
+
+    stages {
+        // =====================================================================
+        // Stage 1: 检出代码
+        // =====================================================================
+        stage('Checkout') {
+            steps {
+                echo "=========================================="
+                echo "📥 检出代码"
+                echo "=========================================="
+                checkout scm
+            }
+        }
+
+        // =====================================================================
+        // Stage 2: 安装工具
+        // =====================================================================
+        stage('Install Tools') {
+            steps {
+                echo "=========================================="
+                echo "📦 安装依赖工具"
+                echo "=========================================="
+                sh '''
+                    # 检查是否已安装必要工具
+                    if ! command -v git > /dev/null 2>&1; then
+                        echo "安装 git..."
+                        apt-get update -qq && apt-get install -y -qq git
+                    fi
+                    if ! command -v perl > /dev/null 2>&1; then
+                        echo "安装 perl..."
+                        apt-get install -y -qq perl
+                    fi
+                    if ! command -v curl > /dev/null 2>&1; then
+                        echo "安装 curl..."
+                        apt-get install -y -qq curl
+                    fi
+                    echo "✅ 依赖检查完成"
+                '''
+            }
+        }
+
+        // =====================================================================
+        // Stage 3: 拉取审查工具
+        // =====================================================================
+        stage('Clone Review Assistant') {
+            steps {
+                echo "=========================================="
+                echo "📥 拉取 code-review-assistant"
+                echo "=========================================="
+                sh '''
+                    # 如果已存在则删除旧版本
+                    if [ -d "$CRA_DIR" ]; then
+                        rm -rf "$CRA_DIR"
+                    fi
+                    # 拉取最新版（--depth 1 只取最新提交）
+                    git clone --depth 1 https://github.com/wzm111/code-review-assistant.git "$CRA_DIR"
+                    echo "✅ 审查工具已下载到 $CRA_DIR"
+                '''
+            }
+        }
+
+        // =====================================================================
+        // Stage 4: 安全扫描
+        // =====================================================================
+        stage('Security Scan') {
+            parallel {
+                stage('Secret Scan') {
+                    steps {
+                        echo "=========================================="
+                        echo "🔐 密钥扫描（严重级别: critical）"
+                        echo "=========================================="
+                        sh '''
+                            bash "$CRA_DIR/scripts/scan-secrets.sh" . critical > secrets.txt 2>&1 || true
+                            cat secrets.txt
+                            SECRET_COUNT=$(grep -c "🔴\|🟠\|🟡" secrets.txt 2>/dev/null || echo "0")
+                            echo "发现密钥问题: ${SECRET_COUNT} 处"
+                        '''
+                    }
+                }
+                stage('Dependency Scan') {
+                    steps {
+                        echo "=========================================="
+                        echo "📦 依赖漏洞扫描"
+                        echo "=========================================="
+                        sh '''
+                            bash "$CRA_DIR/scripts/scan-deps.sh" . > deps.txt 2>&1 || true
+                            cat deps.txt
+                        '''
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // Stage 5: 代码质量检查
+        // =====================================================================
+        stage('Code Quality') {
+            parallel {
+                stage('Code Smell') {
+                    steps {
+                        echo "=========================================="
+                        echo "👃 代码异味检测"
+                        echo "=========================================="
+                        sh '''
+                            bash "$CRA_DIR/scripts/code-smell.sh" . > smell.txt 2>&1 || true
+                            cat smell.txt
+                        '''
+                    }
+                }
+                stage('Naming Convention') {
+                    steps {
+                        echo "=========================================="
+                        echo "📝 命名规范检查"
+                        echo "=========================================="
+                        sh '''
+                            bash "$CRA_DIR/scripts/naming-convention.sh" . > naming.txt 2>&1 || true
+                            cat naming.txt
+                        '''
+                    }
+                }
+                stage('Lint Check') {
+                    steps {
+                        echo "=========================================="
+                        echo "📏 代码规范检查（Lint）"
+                        echo "=========================================="
+                        sh '''
+                            bash "$CRA_DIR/scripts/lint-check.sh" . > lint.txt 2>&1 || true
+                            cat lint.txt
+                        '''
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // Stage 6: 自动修复（可选，默认关闭）
+        // =====================================================================
+        stage('Auto Fix') {
+            when {
+                environment name: 'FIX_MODE', value: 'true'
+            }
+            steps {
+                echo "=========================================="
+                echo "🔧 自动修复（预览模式）"
+                echo "=========================================="
+                sh '''
+                    bash "$CRA_DIR/scripts/auto-fix.sh" . > autofix.txt 2>&1 || true
+                    cat autofix.txt
+                    if [ -f .autofix_candidates ]; then
+                        echo "发现 $(cat .autofix_candidates) 处可修复问题"
+                        echo "如需应用修复，在 Jenkins 参数中将 FIX_MODE 设为 true 后重新构建"
+                    fi
+                '''
+            }
+        }
+
+        // =====================================================================
+        // Stage 7: 质量门禁（失败会阻断构建）
+        // =====================================================================
+        stage('Severity Gate') {
+            steps {
+                echo "=========================================="
+                echo "🚦 质量门禁（阈值: ${SEVERITY}）"
+                echo "=========================================="
+                sh '''
+                    if bash "$CRA_DIR/scripts/severity-gate.sh" . "$SEVERITY"; then
+                        echo "✅ 质量门禁通过"
+                    else
+                        echo "❌ 质量门禁未通过"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+    }
+
+    // =====================================================================
+    // Post 阶段：始终执行（无论成功或失败）
+    // =====================================================================
+    post {
+        always {
+            // 归档所有报告文件
+            archiveArtifacts artifacts: '*.txt', allowEmptyArchive: true
+
+            // 生成汇总报告
+            script {
+                sh '''
+                    echo "=========================================="
+                    echo "📊 Jenkins 代码审查汇总报告"
+                    echo "=========================================="
+
+                    REPORT_FILE="report.md"
+                    echo "# Jenkins 代码审查报告" > "$REPORT_FILE"
+                    echo "" >> "$REPORT_FILE"
+                    echo "**构建号:** ${BUILD_NUMBER} | **门禁级别:** \`${SEVERITY}\`" >> "$REPORT_FILE"
+                    echo "" >> "$REPORT_FILE"
+
+                    for f in secrets deps smell naming lint autofix; do
+                        fname="${f}.txt"
+                        if [ -s "$fname" ]; then
+                            echo "## ${f}" >> "$REPORT_FILE"
+                            echo '```' >> "$REPORT_FILE"
+                            head -50 "$fname" >> "$REPORT_FILE"
+                            echo '```' >> "$REPORT_FILE"
+                            echo "" >> "$REPORT_FILE"
+                        fi
+                    done
+
+                    cat "$REPORT_FILE"
+                '''
+            }
+        }
+
+        success {
+            echo '🎉 代码审查通过！可以合并'
+        }
+
+        failure {
+            echo '❌ 代码审查未通过，请修复问题后重新构建'
+            // 可选：发送通知（邮件/钉钉/企业微信）
+            // emailext subject: "构建失败: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+            //          body: "请查看报告: ${env.BUILD_URL}",
+            //          to: "${env.CHANGE_AUTHOR_EMAIL}"
+        }
+
+        unstable {
+            echo '⚠️ 构建不稳定，建议检查警告信息'
+        }
+    }
+}

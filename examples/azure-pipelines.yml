@@ -1,0 +1,211 @@
+# Azure DevOps Pipelines 配置
+# 使用方式：复制此文件到代码库根目录
+#
+# 前置条件：
+# 1. 代码库托管在 Azure DevOps
+# 2. 分支策略中已配置 PR 触发构建
+# 3. 如需评论到 PR，需确保构建服务账户有 "Contribute to pull requests" 权限
+#
+# 变量说明（在 Azure Pipelines → Library → Variable groups 中配置）：
+#   SEVERITY  - 门禁阈值: critical / high / medium / all（默认 high）
+#   FIX_MODE  - 是否自动修复: true / false（默认 false，建议私有仓库才开启）
+
+trigger:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+      - "release/*"
+      - "hotfix/*"
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+
+# 变量组（在 Azure DevOps 中创建 Variable Group 后引用）
+# variables:
+#   - group: code-review-variables   # 包含 SEVERITY, FIX_MODE
+
+variables:
+  severity: "high"
+  fixMode: false
+
+pool:
+  vmImage: "ubuntu-latest"
+
+steps:
+  # ==========================================================================
+  # Step 1: 检出代码
+  # ==========================================================================
+  - checkout: self
+    displayName: "检出代码"
+    fetchDepth: 50
+
+  # ==========================================================================
+  # Step 2: 安装依赖
+  # ==========================================================================
+  - script: |
+      echo "=========================================="
+      echo "📦 安装依赖工具"
+      echo "=========================================="
+      sudo apt-get update -qq
+      sudo apt-get install -y -qq git perl curl
+    displayName: "安装依赖"
+
+  # ==========================================================================
+  # Step 3: 拉取审查工具
+  # ==========================================================================
+  - script: |
+      echo "=========================================="
+      echo "📥 拉取审查工具"
+      echo "=========================================="
+      git clone --depth 1 https://github.com/wzm111/code-review-assistant.git $(Agent.TempDirectory)/cra
+    displayName: "拉取 code-review-assistant"
+
+  # ==========================================================================
+  # Step 4: 密钥扫描（已脱敏）
+  # ==========================================================================
+  - script: |
+      echo "=========================================="
+      echo "🔐 密钥扫描（严重级别: critical）"
+      echo "=========================================="
+      bash $(Agent.TempDirectory)/cra/scripts/scan-secrets.sh $(Build.SourcesDirectory) critical > $(Agent.TempDirectory)/secrets.txt 2>&1 || true
+      cat $(Agent.TempDirectory)/secrets.txt
+      SECRET_COUNT=$(grep -c "🔴\|🟠\|🟡" $(Agent.TempDirectory)/secrets.txt 2>/dev/null || echo "0")
+      echo "发现密钥问题: ${SECRET_COUNT} 处"
+    displayName: "密钥扫描"
+    continueOnError: true
+
+  # ==========================================================================
+  # Step 5: 依赖漏洞扫描
+  # ==========================================================================
+  - script: |
+      echo "=========================================="
+      echo "📦 依赖漏洞扫描"
+      echo "=========================================="
+      bash $(Agent.TempDirectory)/cra/scripts/scan-deps.sh $(Build.SourcesDirectory) > $(Agent.TempDirectory)/deps.txt 2>&1 || true
+      cat $(Agent.TempDirectory)/deps.txt
+    displayName: "依赖漏洞扫描"
+    continueOnError: true
+
+  # ==========================================================================
+  # Step 6: 代码质量检查
+  # ==========================================================================
+  - script: |
+      echo "=========================================="
+      echo "👃 代码异味检测"
+      echo "=========================================="
+      bash $(Agent.TempDirectory)/cra/scripts/code-smell.sh $(Build.SourcesDirectory) > $(Agent.TempDirectory)/smell.txt 2>&1 || true
+      cat $(Agent.TempDirectory)/smell.txt
+    displayName: "代码异味"
+    continueOnError: true
+
+  - script: |
+      echo "=========================================="
+      echo "📝 命名规范检查"
+      echo "=========================================="
+      bash $(Agent.TempDirectory)/cra/scripts/naming-convention.sh $(Build.SourcesDirectory) > $(Agent.TempDirectory)/naming.txt 2>&1 || true
+      cat $(Agent.TempDirectory)/naming.txt
+    displayName: "命名规范"
+    continueOnError: true
+
+  - script: |
+      echo "=========================================="
+      echo "📏 代码规范检查（Lint）"
+      echo "=========================================="
+      bash $(Agent.TempDirectory)/cra/scripts/lint-check.sh $(Build.SourcesDirectory) > $(Agent.TempDirectory)/lint.txt 2>&1 || true
+      cat $(Agent.TempDirectory)/lint.txt
+    displayName: "代码规范"
+    continueOnError: true
+
+  # ==========================================================================
+  # Step 7: 质量门禁（失败会阻断 PR）
+  # ==========================================================================
+  - script: |
+      echo "=========================================="
+      echo "🚦 质量门禁（阈值: $(severity)）"
+      echo "=========================================="
+      if bash $(Agent.TempDirectory)/cra/scripts/severity-gate.sh $(Build.SourcesDirectory) $(severity); then
+        echo "✅ 质量门禁通过"
+      else
+        echo "##vso[task.logissue type=error]质量门禁未通过"
+        echo "❌ 质量门禁未通过，请修复上述问题后重新提交"
+        exit 1
+      fi
+    displayName: "质量门禁"
+    failOnStderr: false
+
+  # ==========================================================================
+  # Step 8: 生成汇总报告
+  # ==========================================================================
+  - script: |
+      echo "=========================================="
+      echo "📊 生成审查报告"
+      echo "=========================================="
+      REPORT_FILE="$(Build.ArtifactStagingDirectory)/report.md"
+
+      echo "# Azure DevOps 代码审查报告" > "$REPORT_FILE"
+      echo "" >> "$REPORT_FILE"
+      echo "**构建:** $(Build.BuildNumber) | **门禁级别:** \`$(severity)\`" >> "$REPORT_FILE"
+      echo "" >> "$REPORT_FILE"
+
+      for f in secrets deps smell naming lint; do
+        FILE="$(Agent.TempDirectory)/${f}.txt"
+        if [ -s "$FILE" ]; then
+          echo "## ${f}" >> "$REPORT_FILE"
+          echo '```' >> "$REPORT_FILE"
+          head -50 "$FILE" >> "$REPORT_FILE"
+          echo '```' >> "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+        fi
+      done
+
+      cat "$REPORT_FILE"
+    displayName: "生成报告"
+    continueOnError: true
+
+  # ==========================================================================
+  # Step 9: 归档报告（可在构建结果中下载）
+  # ==========================================================================
+  - task: PublishBuildArtifacts@1
+    inputs:
+      pathToPublish: "$(Build.ArtifactStagingDirectory)"
+      artifactName: "code-review-report"
+    displayName: "归档报告"
+    condition: always()
+
+# ==========================================================================
+# 可选：PR 评论（需要配置服务账户权限）
+# ==========================================================================
+# 如需自动评论到 PR，取消注释以下步骤：
+#
+#  - task: PythonScript@0
+#    displayName: "评论到 PR"
+#    inputs:
+#      scriptSource: 'inline'
+#      script: |
+#        import os, requests
+#        org = os.environ['SYSTEM_TEAMFOUNDATIONCOLLECTIONURI'].split('/')[3]
+#        project = os.environ['SYSTEM_TEAMPROJECT']
+#        repo = os.environ['BUILD_REPOSITORY_NAME']
+#        pr_id = os.environ.get('SYSTEM_PULLREQUEST_PULLREQUESTID', '')
+#        token = os.environ['SYSTEM_ACCESSTOKEN']
+#        if not pr_id:
+#            print("非 PR 构建，跳过评论")
+#            exit(0)
+#        # 读取报告
+#        report_path = os.path.join(os.environ['BUILD_ARTIFACTSTAGINGDIRECTORY'], 'report.md')
+#        report = "## Azure DevOps 代码审查报告\n\n"
+#        if os.path.exists(report_path):
+#            with open(report_path) as f:
+#                report += f.read()[:3000]
+#        # 调用 Azure DevOps API
+#        url = f"https://dev.azure.com/{org}/{project}/_apis/git/repositories/{repo}/pullRequests/{pr_id}/threads?api-version=7.0"
+#        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+#        payload = {"comments": [{"content": report, "commentType": 1}], "status": 1}
+#        resp = requests.post(url, headers=headers, json=payload)
+#        print(f"评论状态: {resp.status_code}")

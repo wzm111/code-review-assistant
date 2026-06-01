@@ -1,0 +1,22 @@
+{
+  "name": "code-review-assistant-dashboard",
+  "version": "1.0.0",
+  "description": "Code Review Assistant 可视化 Web Dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:py": "python3 server.py",
+    "dev": "node server.js --port 8080"
+  },
+  "keywords": [
+    "code-review",
+    "dashboard",
+    "ci-cd",
+    "quality-gate"
+  ],
+  "author": "Code Review Assistant",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
