@@ -656,6 +656,57 @@ To add a new language / 添加新语言：
 
 ---
 
+## Custom Rules / 自定义规则
+
+在项目根目录创建 `.review-rules.yml`，审查时自动与 Skill 默认规则合并。
+
+### Quick Start
+
+```bash
+# 复制模板到项目根目录
+cp /path/to/code-review-assistant/.review-rules.yml.template .review-rules.yml
+```
+
+编辑文件，取消注释并修改需要的规则：
+
+```yaml
+version: "1.0"
+
+custom_rules:
+  - id: "myproject:no-raw-sql-in-controller"
+    category: "Architecture"
+    severity: "critical"
+    languages: ["java"]
+    message: "Controller 禁止包含原始 SQL，必须使用 Repository 层"
+    check: "标记 @RestController 中的所有 SQL 字符串"
+
+behavior:
+  project_context: |
+    本项目是 Spring Boot 微服务，使用 PostgreSQL，所有 API 响应包装为 Result<T>。
+  exclude_patterns:
+    - "**/generated/**"
+```
+
+### 可配置项
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| `disable` | 禁用默认规则（按规则 ID） | `["frontend:react-hooks-exhaustive-deps"]` |
+| `custom_rules` | 添加项目专属检查 | 见上方示例 |
+| `behavior.project_context` | 附加到每次审查的上下文 | 技术栈、约定说明 |
+| `behavior.exclude_patterns` | 排除路径（glob） | `["**/*.generated.ts"]` |
+| `languages.<lang>` | 语言专属覆盖 | `languages.python.custom_rules` |
+
+### 合并逻辑
+
+1. **发现**：从目标目录向上查找 `.review-rules.yml`
+2. **默认规则先加载**：`rules/*.md` 中的标准检查
+3. **禁用生效**：`disable` 中的规则 ID 不执行
+4. **自定义规则追加**：`custom_rules` 添加到对应分类
+5. **行为覆盖**：项目上下文附加，阈值更新
+
+---
+
 ## License / 许可证
 
 MIT

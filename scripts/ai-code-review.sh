@@ -343,6 +343,41 @@ progress ""
 progress "${BLUE}共收集 ${FILE_COUNT} 个文件${NC}"
 progress ""
 
+# ═══════════════════════════════════════════════════════════════
+# 项目自定义规则发现（从目标目录向上查找 .review-rules.yml）
+# ═══════════════════════════════════════════════════════════════
+
+discover_rules_file() {
+    local dir="$1"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -f "$dir/.review-rules.yml" ]]; then
+            echo "$dir/.review-rules.yml"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
+RULES_FILE=$(discover_rules_file "$(cd "$TARGET_DIR" && pwd)" 2>/dev/null || true)
+
+CUSTOM_RULES_SECTION=""
+if [[ -n "$RULES_FILE" ]]; then
+    progress "${BLUE}【自定义规则】${NC}"
+    progress "  发现项目规则文件: ${RULES_FILE}"
+    RULES_CONTENT=$(cat "$RULES_FILE" | sed 's/^/    /')
+    CUSTOM_RULES_SECTION="
+## Project Custom Rules / 项目自定义规则
+以下规则来自项目根目录的 .review-rules.yml 文件，请与默认规则合并执行：
+
+${RULES_CONTENT}
+
+请在审查输出中，对来自自定义规则的问题使用 [ProjectRule:<规则ID>] 前缀标记。
+"
+    progress "  ${GREEN}✓${NC} 已加载自定义规则"
+    progress ""
+fi
+
 # ===== 构建 Prompt =====
 
 progress "${BLUE}【构建审查提示】${NC}"
@@ -427,6 +462,13 @@ ${PROMPT_INSTRUCTIONS}
 ## 待审查代码
 
 ${CODE_CONTEXT}"
+
+# 注入项目自定义规则
+if [[ -n "$CUSTOM_RULES_SECTION" ]]; then
+    PROMPT="${PROMPT}
+
+${CUSTOM_RULES_SECTION}"
+fi
 
 progress "  ${GREEN}✓${NC} 提示构建完成"
 progress ""
