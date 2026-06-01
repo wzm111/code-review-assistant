@@ -166,7 +166,6 @@ code-review-assistant/
 │   ├── tencent-coding.yml      # 腾讯云 CODING
 │   ├── azure-pipelines.yml     # Azure DevOps
 │   └── Jenkinsfile             # Jenkins
-├── dashboard/                  # Web Dashboard (optional local runner) / 可视化执行面板（可选本地运行器）
 ├── docs/
 │   └── platform-adapters.md    # Multi-cloud platform guide / 多云平台适配指南
 └── scripts/                    # 40 review scripts + 8 notifiers
