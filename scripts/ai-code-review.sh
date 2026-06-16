@@ -234,6 +234,41 @@ progress "  最大文件数: ${MAX_FILES}"
 progress "  每文件最大行数: ${CONTEXT_LINES}"
 progress ""
 
+# ═══════════════════════════════════════════════════════════════
+# 项目自定义规则提前发现（exclude_patterns 需在文件收集前生效）
+# ═══════════════════════════════════════════════════════════════
+
+discover_rules_file() {
+    local dir="$1"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -f "$dir/.review-rules.yml" ]]; then
+            echo "$dir/.review-rules.yml"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
+# 解析 .review-rules.yml：优先 PyYAML，否则使用独立 fallback 脚本
+parse_review_rules() {
+    local file="$1"
+    python3 "$SCRIPT_DIR/parse_review_rules.py" "$file"
+}
+
+# 提前提取 exclude_patterns，供文件收集阶段过滤
+RULES_FILE=$(discover_rules_file "$(cd "$TARGET_DIR" && pwd)" 2>/dev/null || true)
+EXCLUDE_PATTERNS=""
+if [[ -n "$RULES_FILE" ]]; then
+    RULES_JSON_EARLY=$(parse_review_rules "$RULES_FILE" 2>/dev/null || echo '{"disable":[],"custom_rules":[],"behavior":{}}')
+    EXCLUDE_PATTERNS=$(python3 -c '
+import json, sys
+data = json.loads(sys.argv[1])
+patterns = data.get("behavior", {}).get("exclude_patterns", [])
+print("\n".join(patterns))
+' "$RULES_JSON_EARLY" 2>/dev/null || true)
+fi
+
 # ===== 收集代码上下文 =====
 
 progress "${BLUE}【收集代码上下文】${NC}"
@@ -373,134 +408,8 @@ progress "${BLUE}共收集 ${FILE_COUNT} 个文件${NC}"
 progress ""
 
 # ═══════════════════════════════════════════════════════════════
-# 项目自定义规则发现与解析（从目标目录向上查找 .review-rules.yml）
+# 项目自定义规则生成 prompt（函数定义已提前）
 # ═══════════════════════════════════════════════════════════════
-
-discover_rules_file() {
-    local dir="$1"
-    while [[ "$dir" != "/" ]]; do
-        if [[ -f "$dir/.review-rules.yml" ]]; then
-            echo "$dir/.review-rules.yml"
-            return 0
-        fi
-        dir="$(dirname "$dir")"
-    done
-    return 1
-}
-
-# 尝试 PyYAML，否则回退到轻量级解析器
-parse_review_rules() {
-    local file="$1"
-    python3 -c '
-import sys, json
-try:
-    import yaml
-    with open(sys.argv[1], "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-except Exception:
-    data = None
-
-if data is None:
-    # lightweight fallback parser
-    data = {"disable": [], "custom_rules": [], "behavior": {}, "languages": {}}
-    with open(sys.argv[1], "r", encoding="utf-8") as f:
-        lines = f.readlines()
-    section = None
-    sub_section = None
-    current_rule = None
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        raw = line.rstrip("\n")
-        stripped = raw.lstrip()
-        if not stripped or stripped.startswith("#"):
-            i += 1
-            continue
-        indent = len(raw) - len(stripped)
-
-        # top-level section
-        if stripped.endswith(":") and indent == 0:
-            section = stripped[:-1].strip()
-            sub_section = None
-            i += 1
-            continue
-
-        # disable list
-        if section == "disable" and stripped.startswith("-"):
-            val = stripped[1:].strip().strip("\"'").strip("'\"")
-            if val:
-                data["disable"].append(val)
-            i += 1
-            continue
-
-        # custom_rules list
-        if section == "custom_rules" and stripped.startswith("-"):
-            current_rule = {}
-            first = stripped[1:].strip()
-            if ":" in first:
-                k, v = first.split(":", 1)
-                current_rule[k.strip()] = v.strip().strip("\"'").strip("'\"")
-            j = i + 1
-            while j < len(lines):
-                nl = lines[j]
-                ns = nl.lstrip()
-                if not ns or ns.startswith("#"):
-                    j += 1
-                    continue
-                ni = len(nl) - len(ns)
-                if ni <= indent:
-                    break
-                if ns.startswith("-") or (ns.endswith(":") and ni == indent):
-                    break
-                if ":" in ns:
-                    k, v = ns.split(":", 1)
-                    k = k.strip()
-                    v = v.strip()
-                    if v.startswith("[") and v.endswith("]"):
-                        v = [x.strip().strip("\"'").strip("'\"") for x in v[1:-1].split(",") if x.strip()]
-                    elif v.startswith('"') and v.endswith('"'):
-                        v = v[1:-1]
-                    elif v.startswith("'") and v.endswith("'"):
-                        v = v[1:-1]
-                    elif v.lower() == "true":
-                        v = True
-                    elif v.lower() == "false":
-                        v = False
-                    elif v.isdigit():
-                        v = int(v)
-                    current_rule[k] = v
-                j += 1
-            if current_rule:
-                data["custom_rules"].append(current_rule)
-            i = j
-            continue
-
-        # behavior key-value
-        if section == "behavior" and ":" in stripped and indent == 2:
-            k, v = stripped.split(":", 1)
-            k = k.strip()
-            v = v.strip()
-            if v.startswith("[") and v.endswith("]"):
-                v = [x.strip().strip("\"'").strip("'\"") for x in v[1:-1].split(",") if x.strip()]
-            elif v.startswith('"') and v.endswith('"'):
-                v = v[1:-1]
-            elif v.startswith("'") and v.endswith("'"):
-                v = v[1:-1]
-            elif v.lower() == "true":
-                v = True
-            elif v.lower() == "false":
-                v = False
-            elif v.isdigit():
-                v = int(v)
-            data["behavior"][k] = v
-            i += 1
-            continue
-
-        i += 1
-
-print(json.dumps(data, ensure_ascii=False))
-' "$file"
-}
 
 # 结构化生成 prompt 中的规则部分
 build_structured_rules_prompt() {
@@ -535,21 +444,21 @@ if custom_rules:
         chk = rule.get("check", "")
         parts.append(f"### [{rid}] — {cat} / {sev}")
         if langs:
-            parts.append(f"- 适用语言: {', '.join(langs)}")
+            parts.append("- 适用语言: " + ", ".join(langs))
         if msg:
-            parts.append(f"- 规则说明: {msg}")
+            parts.append("- 规则说明: " + msg)
         if chk:
-            parts.append(f"- 检查方法: {chk}")
+            parts.append("- 检查方法: " + chk)
         parts.append("")
 
 if behavior:
     parts.append("## Behavior Overrides / 审查行为覆盖")
     if "max_function_lines" in behavior:
-        parts.append(f"- 函数最大行数: {behavior['max_function_lines']}")
+        parts.append("- 函数最大行数: " + str(behavior["max_function_lines"]))
     if "project_context" in behavior:
-        parts.append(f"- 项目上下文: {behavior['project_context']}")
+        parts.append("- 项目上下文: " + behavior["project_context"])
     if "exclude_patterns" in behavior:
-        parts.append(f"- 排除路径: {', '.join(behavior['exclude_patterns'])}")
+        parts.append("- 排除路径: " + ", ".join(behavior["exclude_patterns"]))
     parts.append("")
 
 print("\n".join(parts))
@@ -560,25 +469,17 @@ RULES_FILE=$(discover_rules_file "$(cd "$TARGET_DIR" && pwd)" 2>/dev/null || tru
 
 CUSTOM_RULES_SECTION=""
 PROJECT_CONTEXT=""
-EXCLUDE_PATTERNS=""
 if [[ -n "$RULES_FILE" ]]; then
     progress "${BLUE}【自定义规则】${NC}"
     progress "  发现项目规则文件: ${RULES_FILE}"
 
     RULES_JSON=$(parse_review_rules "$RULES_FILE" 2>/dev/null || echo '{"disable":[],"custom_rules":[],"behavior":{}}')
-    CUSTOM_RULES_SECTION=$(build_structured_rules_prompt "$RULES_JSON" 2>/dev/null || "")
+    CUSTOM_RULES_SECTION=$(build_structured_rules_prompt "$RULES_JSON" 2>/dev/null || echo "")
 
     PROJECT_CONTEXT=$(python3 -c '
 import json, sys
 data = json.loads(sys.argv[1])
 print(data.get("behavior", {}).get("project_context", ""))
-' "$RULES_JSON" 2>/dev/null || true)
-
-    EXCLUDE_PATTERNS=$(python3 -c '
-import json, sys
-data = json.loads(sys.argv[1])
-patterns = data.get("behavior", {}).get("exclude_patterns", [])
-print("\n".join(patterns))
 ' "$RULES_JSON" 2>/dev/null || true)
 
     progress "  ${GREEN}✓${NC} 已加载并解析自定义规则"

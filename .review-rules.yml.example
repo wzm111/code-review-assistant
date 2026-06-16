@@ -1,0 +1,70 @@
+# .review-rules.yml — 项目自定义代码审查规则示例
+# 将此文件复制到项目根目录并重命名为 .review-rules.yml，审查时自动生效
+# 完整文档：https://github.com/wzm111/code-review-assistant#custom-rules
+
+version: "1.0"
+
+# ── 禁用默认规则 ──────────────────────────────────────────────
+# 按规则 ID 禁用特定的默认检查（规则 ID 见 rules/*.md 中每条规则前的 [id: ...] 标记）
+disable:
+  - "frontend:react-hooks-exhaustive-deps"
+  - "python:mutable-default-args"
+  - "security:owasp-a06-cve"
+
+# ── 自定义规则 ───────────────────────────────────────────────
+# 添加项目专属检查项，注入到 AI 提示词中
+# severity: critical | warning | suggestion
+# languages: 可选，限定适用语言（如 ["java", "python"]）
+custom_rules:
+  - id: "project:service-impl-suffix"
+    category: "Naming Convention"
+    severity: "warning"
+    languages: ["java"]
+    message: "Service 实现类必须以 'ServiceImpl' 结尾"
+    check: "检查 @Service 类名是否符合规范"
+
+  - id: "project:no-repo-in-controller"
+    category: "Architecture"
+    severity: "critical"
+    languages: ["java", "php"]
+    message: "Controller 禁止直接调用 Repository，必须通过 Service 层"
+    check: "确保所有数据库访问都经过 Service/Domain 层"
+
+  - id: "project:nextjs-image-component"
+    category: "Performance"
+    severity: "warning"
+    languages: ["javascript", "typescript"]
+    message: "Next.js 项目必须使用 <Image> 组件代替 <img>"
+    check: "标记所有原始 <img> 标签"
+
+# ── 审查行为覆盖 ──────────────────────────────────────────────
+# 覆盖该项目的默认审查行为
+behavior:
+  # 函数最大行数（默认 50）
+  max_function_lines: 50
+
+  # 项目上下文，会附加到每次审查的 Context 中
+  project_context: |
+    本项目是 Spring Boot + Vue3 微服务架构，服务间通过 gRPC 通信，数据库使用 PostgreSQL 14。
+
+  # 排除路径（glob 模式）
+  exclude_patterns:
+    - "**/*.generated.ts"
+    - "**/vendor/**"
+    - "**/migrations/*.sql"
+    - "**/*.test.ts"
+
+# ── 语言特定覆盖 ──────────────────────────────────────────────
+# 仅对特定语言生效的规则
+languages:
+  java:
+    custom_rules:
+      - id: "project:java-no-lombok-data"
+        category: "Maintainability"
+        severity: "suggestion"
+        message: "JPA Entity 避免使用 @Data，建议显式 @Getter/@Setter"
+    behavior:
+      max_function_lines: 40
+  python:
+    behavior:
+      max_function_lines: 30
