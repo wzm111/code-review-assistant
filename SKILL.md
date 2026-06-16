@@ -181,25 +181,6 @@ When package manager files changed (`package.json`, `pom.xml`, `requirements.txt
 - Flag known vulnerable versions
 - Suggest `npm audit`, `snyk`, `dependabot`, or `osv-scanner` if appropriate
 
-### Dashboard / 可视化面板
-启动 Web Dashboard 在浏览器中运行脚本：
-
-```bash
-# 方式 1: CLI（安装后）
-cra --dashboard          # 默认端口 8080
-cra --dashboard 9000     # 指定端口
-
-# 方式 2: 直接启动
-bash dashboard/launcher.sh
-
-# 方式 3: npm
-cd dashboard && npm start
-```
-
-**在 Claude Code 或其他 AI 中启动**: 直接说"启动 dashboard"或"打开审查面板"，AI 会帮你执行启动命令。
-
-**注意**: `/code-review-assistant` 斜杠命令本身**不支持参数**（如 `--dashboard`），这是 Claude Code Skill 机制的限制。如需启动面板，请通过对话直接告知。
-
 ### Scheduled Review (定时审查)
 支持通过配置文件设置定时自动审查:
 
