@@ -699,11 +699,25 @@ behavior:
 
 ### 合并逻辑
 
-1. **发现**：从目标目录向上查找 `.review-rules.yml`
-2. **默认规则先加载**：`rules/*.md` 中的标准检查
-3. **禁用生效**：`disable` 中的规则 ID 不执行
-4. **自定义规则追加**：`custom_rules` 添加到对应分类
-5. **行为覆盖**：项目上下文附加，阈值更新
+1. **发现**：脚本从目标目录向上查找 `.review-rules.yml`
+2. **结构化解析**：优先使用 PyYAML，无 PyYAML 时使用内置轻量级解析器
+3. **禁用生效**：`disable` 中的规则 ID 在 prompt 中明确列出，AI 跳过
+4. **自定义规则追加**：`custom_rules` 按 `[ProjectRule:<id>]` 格式注入
+5. **行为覆盖**：`project_context` 附加到 Context，`exclude_patterns` 过滤文件，`max_function_lines` 更新阈值
+
+---
+
+## Context Management / 上下文管理
+
+在连续进行多轮深度审查或处理大型 PR 时，Claude Code 的上下文可能会变得非常长，导致响应变慢或关键信息被截断。
+
+建议在这些场景下执行 Claude Code 的 `/compact` 命令：
+
+- 连续运行 3 次以上 `ai-code-review.sh` 深度审查后
+- 审查涉及超过 10 个文件或单文件超过 500 行
+- 对话中积累了大量审查输出、修复建议和讨论
+
+`/compact` 会压缩并保留关键上下文，让后续审查保持高效。
 
 ---
 

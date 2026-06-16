@@ -1,5 +1,6 @@
 # .review-rules.yml — 项目自定义代码审查规则
 # 将此文件放在项目根目录，审查时自动与 Skill 默认规则合并
+# ai-code-review.sh 会结构化解析本文件，无需 AI 自行合并
 # 完整文档：https://github.com/wzm111/code-review-assistant#custom-rules
 
 version: "1.0"
@@ -41,7 +42,7 @@ custom_rules:
   #   check: "标记所有原始 <img> 标签"
 
 # ── 审查行为覆盖 ──────────────────────────────────────────────
-# 覆盖该项目的默认审查行为
+# 覆盖该项目的默认审查行为（脚本会结构化解析并生效）
 behavior:
   # 函数最大行数（默认 50）
   # max_function_lines: 50

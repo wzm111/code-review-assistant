@@ -33,14 +33,13 @@ Before reviewing, detect the dominant language/tech stack from file extensions a
 | 安全审计专项请求 | 深度执行 [rules/security.md](rules/security.md) |
 
 ### Project Custom Rules (项目自定义规则)
-审查前，从目标目录向上查找 `.review-rules.yml`。若找到，将其内容与默认规则合并：
+审查前，从目标目录向上查找 `.review-rules.yml`。脚本会解析该文件并把以下三部分结构化地加入审查提示词：
 
-1. **禁用规则**：`disable` 列表中的规则 ID 跳过不检查
-2. **追加规则**：`custom_rules` 中的规则添加到对应分类，问题标记为 `[ProjectRule:<id>]` 前缀
-3. **项目上下文**：`behavior.project_context` 附加到审查 Context 部分
-4. **行为覆盖**：`behavior.max_function_lines` 等字段覆盖默认值
+1. **禁用规则**：`disable` 列表中的规则 ID 会被明确列出，审查时跳过
+2. **自定义规则**：`custom_rules` 中的规则按 `[ProjectRule:<id>]` 格式执行
+3. **行为覆盖**：`behavior.max_function_lines`、`behavior.project_context`、`behavior.exclude_patterns` 等会覆盖默认值
 
-### Review Checklist (通用)
+AI 只需按提示词中已结构化的规则执行，不需要自行解析或合并 YAML。
 For every review, systematically check:
 
 1. **Correctness Bugs**

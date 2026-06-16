@@ -292,10 +292,39 @@ else
         exit 0
     fi
 
+    # 检查文件是否匹配 .review-rules.yml 的 exclude_patterns（glob 语法）
+    is_excluded_by_rules() {
+        local file="$1"
+        local patterns="$2"
+        [[ -z "$patterns" ]] && return 1
+        python3 -c '
+import fnmatch, sys
+file = sys.argv[1]
+patterns = sys.argv[2].split("\n")
+for p in patterns:
+    p = p.strip()
+    if not p:
+        continue
+    candidates = [p]
+    if p.startswith("**/"):
+        candidates.append(p[3:])
+    for c in candidates:
+        if fnmatch.fnmatch(file, c) or fnmatch.fnmatch(file, "*/" + c):
+            sys.exit(0)
+sys.exit(1)
+' "$file" "$patterns" 2>/dev/null
+    }
+
     # 处理每个变更文件
     while IFS= read -r file; do
         [[ -z "$file" ]] && continue
         [[ -f "$file" ]] || continue
+
+        # 根据 .review-rules.yml 的 exclude_patterns 跳过文件
+        if is_excluded_by_rules "$file" "$EXCLUDE_PATTERNS"; then
+            progress "  ${YELLOW}⏭️  ${file} 被项目规则排除${NC}"
+            continue
+        fi
 
         # 跳过二进制文件
         file_type=$(file -b --mime-type "$file" 2>/dev/null || echo "application/octet-stream")
@@ -344,7 +373,7 @@ progress "${BLUE}共收集 ${FILE_COUNT} 个文件${NC}"
 progress ""
 
 # ═══════════════════════════════════════════════════════════════
-# 项目自定义规则发现（从目标目录向上查找 .review-rules.yml）
+# 项目自定义规则发现与解析（从目标目录向上查找 .review-rules.yml）
 # ═══════════════════════════════════════════════════════════════
 
 discover_rules_file() {
@@ -359,23 +388,207 @@ discover_rules_file() {
     return 1
 }
 
+# 尝试 PyYAML，否则回退到轻量级解析器
+parse_review_rules() {
+    local file="$1"
+    python3 -c '
+import sys, json
+try:
+    import yaml
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+except Exception:
+    data = None
+
+if data is None:
+    # lightweight fallback parser
+    data = {"disable": [], "custom_rules": [], "behavior": {}, "languages": {}}
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    section = None
+    sub_section = None
+    current_rule = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        raw = line.rstrip("\n")
+        stripped = raw.lstrip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+        indent = len(raw) - len(stripped)
+
+        # top-level section
+        if stripped.endswith(":") and indent == 0:
+            section = stripped[:-1].strip()
+            sub_section = None
+            i += 1
+            continue
+
+        # disable list
+        if section == "disable" and stripped.startswith("-"):
+            val = stripped[1:].strip().strip("\"'").strip("'\"")
+            if val:
+                data["disable"].append(val)
+            i += 1
+            continue
+
+        # custom_rules list
+        if section == "custom_rules" and stripped.startswith("-"):
+            current_rule = {}
+            first = stripped[1:].strip()
+            if ":" in first:
+                k, v = first.split(":", 1)
+                current_rule[k.strip()] = v.strip().strip("\"'").strip("'\"")
+            j = i + 1
+            while j < len(lines):
+                nl = lines[j]
+                ns = nl.lstrip()
+                if not ns or ns.startswith("#"):
+                    j += 1
+                    continue
+                ni = len(nl) - len(ns)
+                if ni <= indent:
+                    break
+                if ns.startswith("-") or (ns.endswith(":") and ni == indent):
+                    break
+                if ":" in ns:
+                    k, v = ns.split(":", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    if v.startswith("[") and v.endswith("]"):
+                        v = [x.strip().strip("\"'").strip("'\"") for x in v[1:-1].split(",") if x.strip()]
+                    elif v.startswith('"') and v.endswith('"'):
+                        v = v[1:-1]
+                    elif v.startswith("'") and v.endswith("'"):
+                        v = v[1:-1]
+                    elif v.lower() == "true":
+                        v = True
+                    elif v.lower() == "false":
+                        v = False
+                    elif v.isdigit():
+                        v = int(v)
+                    current_rule[k] = v
+                j += 1
+            if current_rule:
+                data["custom_rules"].append(current_rule)
+            i = j
+            continue
+
+        # behavior key-value
+        if section == "behavior" and ":" in stripped and indent == 2:
+            k, v = stripped.split(":", 1)
+            k = k.strip()
+            v = v.strip()
+            if v.startswith("[") and v.endswith("]"):
+                v = [x.strip().strip("\"'").strip("'\"") for x in v[1:-1].split(",") if x.strip()]
+            elif v.startswith('"') and v.endswith('"'):
+                v = v[1:-1]
+            elif v.startswith("'") and v.endswith("'"):
+                v = v[1:-1]
+            elif v.lower() == "true":
+                v = True
+            elif v.lower() == "false":
+                v = False
+            elif v.isdigit():
+                v = int(v)
+            data["behavior"][k] = v
+            i += 1
+            continue
+
+        i += 1
+
+print(json.dumps(data, ensure_ascii=False))
+' "$file"
+}
+
+# 结构化生成 prompt 中的规则部分
+build_structured_rules_prompt() {
+    local json_data="$1"
+    python3 -c '
+import json, sys
+data = json.loads(sys.argv[1])
+disabled = data.get("disable", [])
+custom_rules = data.get("custom_rules", [])
+behavior = data.get("behavior", {})
+
+parts = []
+
+if disabled:
+    parts.append("## Disabled Default Rules / 已禁用默认规则")
+    parts.append("以下默认规则 ID 在本次审查中跳过不执行：")
+    for r in disabled:
+        parts.append(f"- {r}")
+    parts.append("请确保审查输出中不包含这些规则的发现。")
+    parts.append("")
+
+if custom_rules:
+    parts.append("## Custom Rules / 自定义规则")
+    parts.append("以下规则必须执行，问题标记前缀为 [ProjectRule:<id>]：")
+    parts.append("")
+    for rule in custom_rules:
+        rid = rule.get("id", "project:unknown")
+        cat = rule.get("category", "Custom")
+        sev = rule.get("severity", "suggestion")
+        langs = rule.get("languages", [])
+        msg = rule.get("message", "")
+        chk = rule.get("check", "")
+        parts.append(f"### [{rid}] — {cat} / {sev}")
+        if langs:
+            parts.append(f"- 适用语言: {', '.join(langs)}")
+        if msg:
+            parts.append(f"- 规则说明: {msg}")
+        if chk:
+            parts.append(f"- 检查方法: {chk}")
+        parts.append("")
+
+if behavior:
+    parts.append("## Behavior Overrides / 审查行为覆盖")
+    if "max_function_lines" in behavior:
+        parts.append(f"- 函数最大行数: {behavior['max_function_lines']}")
+    if "project_context" in behavior:
+        parts.append(f"- 项目上下文: {behavior['project_context']}")
+    if "exclude_patterns" in behavior:
+        parts.append(f"- 排除路径: {', '.join(behavior['exclude_patterns'])}")
+    parts.append("")
+
+print("\n".join(parts))
+' "$json_data"
+}
+
 RULES_FILE=$(discover_rules_file "$(cd "$TARGET_DIR" && pwd)" 2>/dev/null || true)
 
 CUSTOM_RULES_SECTION=""
+PROJECT_CONTEXT=""
+EXCLUDE_PATTERNS=""
 if [[ -n "$RULES_FILE" ]]; then
     progress "${BLUE}【自定义规则】${NC}"
     progress "  发现项目规则文件: ${RULES_FILE}"
-    RULES_CONTENT=$(cat "$RULES_FILE" | sed 's/^/    /')
-    CUSTOM_RULES_SECTION="
-## Project Custom Rules / 项目自定义规则
-以下规则来自项目根目录的 .review-rules.yml 文件，请与默认规则合并执行：
 
-${RULES_CONTENT}
+    RULES_JSON=$(parse_review_rules "$RULES_FILE" 2>/dev/null || echo '{"disable":[],"custom_rules":[],"behavior":{}}')
+    CUSTOM_RULES_SECTION=$(build_structured_rules_prompt "$RULES_JSON" 2>/dev/null || "")
 
-请在审查输出中，对来自自定义规则的问题使用 [ProjectRule:<规则ID>] 前缀标记。
-"
-    progress "  ${GREEN}✓${NC} 已加载自定义规则"
+    PROJECT_CONTEXT=$(python3 -c '
+import json, sys
+data = json.loads(sys.argv[1])
+print(data.get("behavior", {}).get("project_context", ""))
+' "$RULES_JSON" 2>/dev/null || true)
+
+    EXCLUDE_PATTERNS=$(python3 -c '
+import json, sys
+data = json.loads(sys.argv[1])
+patterns = data.get("behavior", {}).get("exclude_patterns", [])
+print("\n".join(patterns))
+' "$RULES_JSON" 2>/dev/null || true)
+
+    progress "  ${GREEN}✓${NC} 已加载并解析自定义规则"
     progress ""
+fi
+
+# 项目上下文注入项
+PROJECT_CONTEXT_ITEM=""
+if [[ -n "$PROJECT_CONTEXT" ]]; then
+    PROJECT_CONTEXT_ITEM="- **Project Context**: ${PROJECT_CONTEXT}"
 fi
 
 # ===== 构建 Prompt =====
@@ -408,6 +621,7 @@ ${PROMPT_INSTRUCTIONS}
 - **Intent**: 代码意图（这段代码要解决什么问题）
 - **Scope**: 影响范围（涉及哪些文件、模块、页面）
 - **Risk Level**: LOW / MEDIUM / HIGH / CRITICAL
+${PROJECT_CONTEXT_ITEM}
 
 ## Summary
 2-4 句总体评估。明确给出结论：Approve / Comment / Request Changes。
