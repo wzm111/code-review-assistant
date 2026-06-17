@@ -39,6 +39,8 @@ Before reviewing, detect the dominant language/tech stack from file extensions a
 2. **自定义规则**：`custom_rules` 中的规则按 `[ProjectRule:<id>]` 格式执行
 3. **行为覆盖**：`behavior.max_function_lines`、`behavior.project_context`、`behavior.exclude_patterns` 等会覆盖默认值
 
+规则 ID 格式为 `领域:规则名`，例如 `frontend:react-hooks-exhaustive-deps`、`java:try-with-resources`、`security:owasp-a06-cve`。所有默认规则都在 `rules/*.md` 中以 `[id: ...]` 标记，可直接复制到 `disable` 列表中。
+
 AI 只需按提示词中已结构化的规则执行，不需要自行解析或合并 YAML。
 For every review, systematically check:
 

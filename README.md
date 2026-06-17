@@ -687,6 +687,35 @@ behavior:
     - "**/generated/**"
 ```
 
+### 规则 ID 索引
+
+`disable` 列表需要引用规则 ID。所有默认规则都在 `rules/*.md` 中以 `[id: 领域:规则名]` 标记，例如：
+
+```markdown
+- [id: frontend:react-hooks-exhaustive-deps] [ ] `useEffect` 依赖数组是否完整？
+- [id: java:try-with-resources] [ ] `try-with-resources` 是否用于 `AutoCloseable`？
+- [id: security:owasp-a06-cve] [ ] 依赖项是否存在已知 CVE？
+```
+
+按领域的规则数量统计：
+
+| 领域 | 规则文件 | 规则数量 |
+| ------ | --------- | ---------: |
+| AI / ML | `rules/aiml.md` | 35 |
+| Big Data | `rules/bigdata.md` | 29 |
+| Blockchain | `rules/blockchain.md` | 29 |
+| Database | `rules/database.md` | 25 |
+| DevOps | `rules/devops.md` | 25 |
+| Frontend / Node.js | `rules/frontend.md` | 47 |
+| Go | `rules/go.md` | 20 |
+| Java | `rules/java.md` | 28 |
+| Mobile | `rules/mobile.md` | 39 |
+| PHP | `rules/php.md` | 23 |
+| Python | `rules/python.md` | 24 |
+| Security | `rules/security.md` | 30 |
+
+要禁用某条规则，直接复制其 `[id: ...]` 到 `disable` 列表即可。完整的规则清单请查看对应 `rules/*.md` 文件。
+
 ### 可配置项
 
 | 字段 | 说明 | 示例 |
