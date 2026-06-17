@@ -719,9 +719,10 @@ behavior:
 ### 可配置项
 
 | 字段 | 说明 | 示例 |
-|------|------|------|
+| ------ | --------- | --------- |
 | `disable` | 禁用默认规则（按规则 ID） | `["frontend:react-hooks-exhaustive-deps"]` |
 | `custom_rules` | 添加项目专属检查 | 见上方示例 |
+| `custom_rules[].languages` | 限定规则适用的语言 | `["java", "php"]` |
 | `behavior.project_context` | 附加到每次审查的上下文 | 技术栈、约定说明 |
 | `behavior.exclude_patterns` | 排除路径（glob） | `["**/*.generated.ts"]` |
 | `languages.<lang>` | 语言专属覆盖 | `languages.python.custom_rules` |
@@ -731,8 +732,11 @@ behavior:
 1. **发现**：脚本从目标目录向上查找 `.review-rules.yml`
 2. **结构化解析**：优先使用 PyYAML，无 PyYAML 时使用内置轻量级解析器
 3. **禁用生效**：`disable` 中的规则 ID 在 prompt 中明确列出，AI 跳过
-4. **自定义规则追加**：`custom_rules` 按 `[ProjectRule:<id>]` 格式注入
-5. **行为覆盖**：`project_context` 附加到 Context，`exclude_patterns` 过滤文件，`max_function_lines` 更新阈值
+4. **语言检测**：脚本根据变更文件的扩展名推断涉及语言（如 `java`、`typescript`、`python`）
+5. **自定义规则过滤**：`custom_rules` 中带有 `languages` 的规则，只有在与检测语言匹配时才会注入
+6. **自定义规则追加**：匹配的 `custom_rules` 按 `[ProjectRule:<id>]` 格式注入
+7. **语言专属覆盖**：`languages.<lang>` 下定义的 custom_rules 和 behavior 仅在该语言被检测到时注入
+8. **行为覆盖**：`project_context` 附加到 Context，`exclude_patterns` 过滤文件，`max_function_lines` 更新阈值
 
 ---
 

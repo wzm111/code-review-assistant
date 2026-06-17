@@ -33,11 +33,12 @@ Before reviewing, detect the dominant language/tech stack from file extensions a
 | 安全审计专项请求 | 深度执行 [rules/security.md](rules/security.md) |
 
 ### Project Custom Rules (项目自定义规则)
-审查前，从目标目录向上查找 `.review-rules.yml`。脚本会解析该文件并把以下三部分结构化地加入审查提示词：
+审查前，从目标目录向上查找 `.review-rules.yml`。脚本会解析该文件并把以下部分结构化地加入审查提示词：
 
 1. **禁用规则**：`disable` 列表中的规则 ID 会被明确列出，审查时跳过
-2. **自定义规则**：`custom_rules` 中的规则按 `[ProjectRule:<id>]` 格式执行
+2. **自定义规则**：`custom_rules` 中的规则按 `[ProjectRule:<id>]` 格式执行；若规则包含 `languages` 字段，仅在检测到对应语言时注入
 3. **行为覆盖**：`behavior.max_function_lines`、`behavior.project_context`、`behavior.exclude_patterns` 等会覆盖默认值
+4. **语言专属覆盖**：`languages.<lang>` 下的 `custom_rules` 和 `behavior` 仅在该语言被检测到时注入
 
 规则 ID 格式为 `领域:规则名`，例如 `frontend:react-hooks-exhaustive-deps`、`java:try-with-resources`、`security:owasp-a06-cve`。所有默认规则都在 `rules/*.md` 中以 `[id: ...]` 标记，可直接复制到 `disable` 列表中。
 

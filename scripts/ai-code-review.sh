@@ -407,6 +407,14 @@ progress ""
 progress "${BLUE}共收集 ${FILE_COUNT} 个文件${NC}"
 progress ""
 
+# 根据收集到的文件推断涉及的语言
+DETECTED_LANGUAGES=""
+if [[ -n "$FILE_PATH" ]]; then
+    DETECTED_LANGUAGES=$(detect_review_languages "$FILE_PATH" 2>/dev/null || true)
+elif [[ -n "$CHANGED_FILES" ]]; then
+    DETECTED_LANGUAGES=$(detect_review_languages "$CHANGED_FILES" 2>/dev/null || true)
+fi
+
 # ═══════════════════════════════════════════════════════════════
 # 项目自定义规则生成 prompt（函数定义已提前）
 # ═══════════════════════════════════════════════════════════════
@@ -414,12 +422,23 @@ progress ""
 # 结构化生成 prompt 中的规则部分
 build_structured_rules_prompt() {
     local json_data="$1"
+    local detected_langs="${2:-}"
     python3 -c '
 import json, sys
 data = json.loads(sys.argv[1])
+detected = set(sys.argv[2].split(",")) if sys.argv[2] else set()
 disabled = data.get("disable", [])
 custom_rules = data.get("custom_rules", [])
 behavior = data.get("behavior", {})
+languages = data.get("languages", {})
+
+def rule_applies(rule):
+    langs = rule.get("languages", [])
+    if not langs:
+        return True
+    if not detected:
+        return True
+    return bool(set(langs) & detected)
 
 parts = []
 
@@ -431,11 +450,14 @@ if disabled:
     parts.append("请确保审查输出中不包含这些规则的发现。")
     parts.append("")
 
-if custom_rules:
+filtered_rules = [r for r in custom_rules if rule_applies(r)]
+if filtered_rules:
     parts.append("## Custom Rules / 自定义规则")
+    if detected:
+        parts.append("检测到当前审查涉及语言: " + ", ".join(sorted(detected)))
     parts.append("以下规则必须执行，问题标记前缀为 [ProjectRule:<id>]：")
     parts.append("")
-    for rule in custom_rules:
+    for rule in filtered_rules:
         rid = rule.get("id", "project:unknown")
         cat = rule.get("category", "Custom")
         sev = rule.get("severity", "suggestion")
@@ -461,8 +483,63 @@ if behavior:
         parts.append("- 排除路径: " + ", ".join(behavior["exclude_patterns"]))
     parts.append("")
 
+if languages:
+    applicable = sorted([l for l in languages.keys() if not detected or l in detected])
+    if applicable:
+        parts.append("## Language-Specific Overrides / 语言专属覆盖")
+        for lang in applicable:
+            parts.append(f"### {lang}")
+            lang_rules = languages[lang].get("custom_rules", [])
+            lang_behavior = languages[lang].get("behavior", {})
+            if lang_rules:
+                parts.append("额外自定义规则：")
+                for rule in lang_rules:
+                    rid = rule.get("id", lang + ":unknown")
+                    msg = rule.get("message", "")
+                    parts.append(f"- [{rid}] {msg}")
+            if lang_behavior:
+                parts.append("行为覆盖：")
+                for k, v in lang_behavior.items():
+                    parts.append(f"- {k}: {v}")
+        parts.append("")
+
 print("\n".join(parts))
-' "$json_data"
+' "$json_data" "$detected_langs"
+}
+
+# 根据审查文件路径推断涉及的语言标签
+detect_review_languages() {
+    local files_input="$1"
+    python3 -c '
+import os, sys
+files = sys.argv[1].split("\n")
+EXT_TO_LANG = {
+    ".java": "java", ".kt": "java",
+    ".py": "python", ".ipynb": "python",
+    ".js": "javascript", ".jsx": "javascript",
+    ".ts": "typescript", ".tsx": "typescript", ".vue": "typescript",
+    ".go": "go",
+    ".php": "php",
+    ".sql": "database", ".prisma": "database",
+    ".yaml": "devops", ".yml": "devops", ".tf": "devops",
+    ".swift": "mobile", ".m": "mobile", ".dart": "mobile",
+    ".sol": "blockchain",
+    ".h5": "aiml", ".onnx": "aiml",
+}
+langs = set()
+for f in files:
+    f = f.strip()
+    if not f:
+        continue
+    base = os.path.basename(f)
+    if base.startswith("Dockerfile"):
+        langs.add("devops")
+        continue
+    ext = os.path.splitext(f)[1].lower()
+    if ext in EXT_TO_LANG:
+        langs.add(EXT_TO_LANG[ext])
+print(",".join(sorted(langs)))
+' "$files_input"
 }
 
 RULES_FILE=$(discover_rules_file "$(cd "$TARGET_DIR" && pwd)" 2>/dev/null || true)
@@ -473,8 +550,8 @@ if [[ -n "$RULES_FILE" ]]; then
     progress "${BLUE}【自定义规则】${NC}"
     progress "  发现项目规则文件: ${RULES_FILE}"
 
-    RULES_JSON=$(parse_review_rules "$RULES_FILE" 2>/dev/null || echo '{"disable":[],"custom_rules":[],"behavior":{}}')
-    CUSTOM_RULES_SECTION=$(build_structured_rules_prompt "$RULES_JSON" 2>/dev/null || echo "")
+    RULES_JSON=$(parse_review_rules "$RULES_FILE" 2>/dev/null || echo '{"disable":[],"custom_rules":[],"behavior":{},"languages":{}}')
+    CUSTOM_RULES_SECTION=$(build_structured_rules_prompt "$RULES_JSON" "$DETECTED_LANGUAGES" 2>/dev/null || echo "")
 
     PROJECT_CONTEXT=$(python3 -c '
 import json, sys
