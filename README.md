@@ -26,7 +26,10 @@ scheduled-review --now --scan-secrets --scan-deps --impact --context --export ma
 scheduled-review --now --db-migration --api-contract --error-handling --resource-leak \
   --config-drift --naming --codeowners --license
 
-# 6. 安装定时任务（工作日每天 9:00 自动审查 + 飞书通知）
+# 6. 摘要模式：快速获取关键结论和统计（适合大 PR 或 CI 门禁）
+bash scripts/ai-code-review.sh . "" standard --summary
+
+# 7. 安装定时任务（工作日每天 9:00 自动审查 + 飞书通知）
 scheduled-review --install --time 09:00 --days 1-5 \
   --notify feishu --webhook "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
 ```
@@ -377,6 +380,7 @@ scheduled-review --now
 | Command / 命令 | Description / 说明 |
 |---------------|-------------------|
 | `scheduled-review --now` | Review immediately / 立即审查 |
+| `bash scripts/ai-code-review.sh . "" standard --summary` | Summary mode / 摘要模式，只输出关键结论和统计 |
 | `scheduled-review --install --time 09:00` | Daily at 9AM / 每天上午9点 |
 | `scheduled-review --install --days 1-5 --time 09:00,18:00` | Twice on weekdays / 工作日早晚各一次 |
 | `scheduled-review --install --days all --time 09:00` | Every day / 每天 |

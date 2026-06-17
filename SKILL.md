@@ -100,6 +100,17 @@ Nice-to-have improvements.
 What was done well (don't skip this).
 ```
 
+### Summary Mode (--summary)
+When the user passes `--summary` to `scripts/ai-code-review.sh`, produce a concise summary only:
+
+1. **Context**: intent, scope, and risk level
+2. **Summary**: 1-2 sentence verdict (Approve / Comment / Request Changes)
+3. **Issue Statistics**: counts of Critical / Warning / Suggestion
+4. **Top Critical Issues 🔴** (at most 5): title + file path/line + one-sentence description
+5. **Top Warnings 🟡** (at most 3, optional): title + file path/line + one-sentence description
+
+Do **not** output detailed Before/After code blocks, full explanations, or Positive Notes in summary mode.
+
 ### Rules
 - Always cite specific file and line numbers using `[filename.ts:42]` format
 - Provide concrete code suggestions, not vague complaints

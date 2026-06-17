@@ -20,6 +20,14 @@ REPORT_FILE=".ai-review-report-${TIMESTAMP}.md"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# 解析可选参数
+SUMMARY_MODE=0
+for arg in "$@"; do
+    case "$arg" in
+        --summary) SUMMARY_MODE=1 ;;
+    esac
+done
+
 # Dashboard 安静模式：只输出报告内容，减少进度信息
 QUIET=0
 if [[ "${DASHBOARD_QUIET:-}" == "1" ]]; then
@@ -585,10 +593,24 @@ case "$DEPTH" in
         ;;
 esac
 
+# 摘要模式覆盖详细说明
+SUMMARY_HINT=""
+if [[ "$SUMMARY_MODE" == "1" ]]; then
+    PROMPT_INSTRUCTIONS="执行摘要式代码审查。只输出总体结论、问题数量统计、以及最多 5 个最关键问题的简要说明。"
+    SUMMARY_HINT="
+
+## 摘要模式约束
+当前使用摘要模式（--summary），请严格遵守以下格式，忽略下方默认输出格式中的详细展开要求：
+- 输出结构为：Context → Summary → Issue Statistics → Top Critical Issues（最多 5 条） → Top Warnings（最多 3 条，可选）
+- Critical Issues 最多 5 条，Warnings 最多 3 条，不输出 Suggestions 和 Positive Notes
+- 每条问题只需要问题标题、文件路径和行号、一句话描述，不要展开 Before/After 代码对比
+- 不要输出详细修复方案、示例格式和 Positive Notes"
+fi
+
 PROMPT="你是一位拥有 10 年经验的资深代码审查专家。请对以下代码进行深度审查，输出结构化的 Markdown 格式审查报告。
 
 ## 审查要求
-${PROMPT_INSTRUCTIONS}
+${PROMPT_INSTRUCTIONS}${SUMMARY_HINT}
 
 ## 输出格式（必须严格遵循）
 请使用中文，按以下结构输出：
@@ -663,6 +685,9 @@ ${CUSTOM_RULES_SECTION}"
 fi
 
 progress "  ${GREEN}✓${NC} 提示构建完成"
+if [[ "$SUMMARY_MODE" == "1" ]]; then
+    progress "  ${BLUE}ℹ${NC} 摘要模式已启用（--summary）：只输出关键结论和统计"
+fi
 progress ""
 
 # ===== 调用 API =====
