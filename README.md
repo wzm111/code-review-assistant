@@ -763,7 +763,7 @@ behavior:
 | 阶段 | 方向 | 目标 | 状态 |
 | ------ | ------ | ------ | ------ |
 | P1 | **端到端集成验证** | 用真实混合语言 PR 验证 `--summary`、`languages` 过滤、`.review-rules.yml` 注入是否真正生效 | ✅ 已完成 |
-| P1 | **规则 ID 规范化** | 给 `rules/*.md` 补全正式 `[id: 领域:规则名]` 标记，让 `disable` 可校验、可自动补全 | 待开始 |
+| P1 | **规则 ID 规范化** | 给 `rules/*.md` 补全正式 `[id: 领域:规则名]` 标记，让 `disable` 可校验、可自动补全 | ✅ 已完成 |
 | P2 | **多云/云厂商无关的 CI 模板** | 提供 Dockerfile + entrypoint.sh，以及阿里云效、腾讯云 CODING、Jenkins 等通用接入示例 | 待开始 |
 | P2 | **`--fix` 自动应用补丁** | 从“AI 生成 patch 文本”升级为“脚本解析 diff 并可选自动应用” | 待开始 |
 | P3 | **审查报告结构化持久化** | 输出 JSON/SARIF 格式报告，保存历史，支持 `--history-compare` | 待开始 |
