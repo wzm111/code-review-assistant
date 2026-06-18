@@ -415,17 +415,44 @@ progress ""
 progress "${BLUE}共收集 ${FILE_COUNT} 个文件${NC}"
 progress ""
 
-# 根据收集到的文件推断涉及的语言
-DETECTED_LANGUAGES=""
-if [[ -n "$FILE_PATH" ]]; then
-    DETECTED_LANGUAGES=$(detect_review_languages "$FILE_PATH" 2>/dev/null || true)
-elif [[ -n "$CHANGED_FILES" ]]; then
-    DETECTED_LANGUAGES=$(detect_review_languages "$CHANGED_FILES" 2>/dev/null || true)
-fi
-
 # ═══════════════════════════════════════════════════════════════
 # 项目自定义规则生成 prompt（函数定义已提前）
 # ═══════════════════════════════════════════════════════════════
+
+# 根据审查文件路径推断涉及的语言标签
+detect_review_languages() {
+    local files_input="$1"
+    python3 -c '
+import os, sys
+files = sys.argv[1].split("\n")
+EXT_TO_LANG = {
+    ".java": "java", ".kt": "java",
+    ".py": "python", ".ipynb": "python",
+    ".js": "javascript", ".jsx": "javascript",
+    ".ts": "typescript", ".tsx": "typescript", ".vue": "typescript",
+    ".go": "go",
+    ".php": "php",
+    ".sql": "database", ".prisma": "database",
+    ".yaml": "devops", ".yml": "devops", ".tf": "devops",
+    ".swift": "mobile", ".m": "mobile", ".dart": "mobile",
+    ".sol": "blockchain",
+    ".h5": "aiml", ".onnx": "aiml",
+}
+langs = set()
+for f in files:
+    f = f.strip()
+    if not f:
+        continue
+    base = os.path.basename(f)
+    if base.startswith("Dockerfile"):
+        langs.add("devops")
+        continue
+    ext = os.path.splitext(f)[1].lower()
+    if ext in EXT_TO_LANG:
+        langs.add(EXT_TO_LANG[ext])
+print(",".join(sorted(langs)))
+' "$files_input"
+}
 
 # 结构化生成 prompt 中的规则部分
 build_structured_rules_prompt() {
@@ -515,40 +542,13 @@ print("\n".join(parts))
 ' "$json_data" "$detected_langs"
 }
 
-# 根据审查文件路径推断涉及的语言标签
-detect_review_languages() {
-    local files_input="$1"
-    python3 -c '
-import os, sys
-files = sys.argv[1].split("\n")
-EXT_TO_LANG = {
-    ".java": "java", ".kt": "java",
-    ".py": "python", ".ipynb": "python",
-    ".js": "javascript", ".jsx": "javascript",
-    ".ts": "typescript", ".tsx": "typescript", ".vue": "typescript",
-    ".go": "go",
-    ".php": "php",
-    ".sql": "database", ".prisma": "database",
-    ".yaml": "devops", ".yml": "devops", ".tf": "devops",
-    ".swift": "mobile", ".m": "mobile", ".dart": "mobile",
-    ".sol": "blockchain",
-    ".h5": "aiml", ".onnx": "aiml",
-}
-langs = set()
-for f in files:
-    f = f.strip()
-    if not f:
-        continue
-    base = os.path.basename(f)
-    if base.startswith("Dockerfile"):
-        langs.add("devops")
-        continue
-    ext = os.path.splitext(f)[1].lower()
-    if ext in EXT_TO_LANG:
-        langs.add(EXT_TO_LANG[ext])
-print(",".join(sorted(langs)))
-' "$files_input"
-}
+# 根据收集到的文件推断涉及的语言
+DETECTED_LANGUAGES=""
+if [[ -n "$FILE_PATH" ]]; then
+    DETECTED_LANGUAGES=$(detect_review_languages "$FILE_PATH" 2>/dev/null || true)
+elif [[ -n "$CHANGED_FILES" ]]; then
+    DETECTED_LANGUAGES=$(detect_review_languages "$CHANGED_FILES" 2>/dev/null || true)
+fi
 
 RULES_FILE=$(discover_rules_file "$(cd "$TARGET_DIR" && pwd)" 2>/dev/null || true)
 
