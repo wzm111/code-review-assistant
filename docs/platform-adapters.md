@@ -33,7 +33,61 @@
 | **腾讯云 CODING** | `ci.yml` | MR / 手动 | ✅ API 评论 |
 | **Azure DevOps** | `azure-pipelines.yml` | PR / 手动 | ✅ PR Thread API |
 | **Jenkins** | `Jenkinsfile` | Webhook / 手动 | ✅ GitLab/GitHub API |
-| **通用 Docker** | 任意 | 任意 | ❌ 仅日志 |
+| **通用 Docker** | `Dockerfile` + `docker-entrypoint.sh` | 任意 | ❌ 仅日志（可扩展） |
+
+---
+
+## 0. 通用 Docker 镜像（推荐 / 云厂商无关）
+
+如果你使用阿里云效、腾讯云 CODING、Jenkins 或其他任意支持 Docker 的 CI 平台，推荐先构建一个统一的审查镜像，各平台直接引用该镜像。这样无需每次流水线都克隆工具仓库，也避免网络波动导致失败。
+
+### 0.1 构建并推送镜像
+
+仓库根目录已提供 `Dockerfile` 和 `docker-entrypoint.sh`：
+
+```bash
+# 本地构建
+docker build -t code-review-assistant:latest .
+
+# 推送到你的镜像仓库（以阿里云 ACR 为例）
+docker tag code-review-assistant:latest \
+  registry.cn-hangzhou.aliyuncs.com/your-namespace/code-review-assistant:latest
+docker push registry.cn-hangzhou.aliyuncs.com/your-namespace/code-review-assistant:latest
+```
+
+### 0.2 本地测试
+
+```bash
+# 直接运行（挂载当前目录）
+docker run --rm -v $(pwd):/workspace code-review-assistant:latest
+
+# 仅做密钥扫描
+docker run --rm -v $(pwd):/workspace \
+  -e SCAN_SECRET=true -e SCAN_DEPS=false -e SCAN_QUALITY=false \
+  code-review-assistant:latest
+
+# 使用 docker-compose（examples/docker-compose.yml）
+docker compose -f examples/docker-compose.yml up --build
+```
+
+### 0.3 环境变量
+
+| 变量 | 默认值 | 说明 |
+| ------ | -------- | ------ |
+| `SEVERITY` | `high` | 门禁阈值：`critical` / `high` / `medium` / `all` |
+| `SCAN_SECRET` | `true` | 是否执行密钥扫描 |
+| `SCAN_DEPS` | `true` | 是否执行依赖漏洞扫描 |
+| `SCAN_QUALITY` | `true` | 是否执行代码质量检查 |
+| `REPORT_DIR` | `/tmp/cra-reports` | 报告输出目录 |
+
+### 0.4 各平台接入
+
+| 平台 | Docker 模板 | 说明 |
+| ------ | ------------ | ------ |
+| 阿里云效 Flow | [`examples/aliyun-flow-docker.yml`](../examples/aliyun-flow-docker.yml) | 使用自定义镜像 |
+| 腾讯云 CODING | [`examples/tencent-coding-docker.yml`](../examples/tencent-coding-docker.yml) | 使用自定义镜像 |
+| Jenkins | [`examples/Jenkinsfile-docker`](../examples/Jenkinsfile-docker) | 使用 `agent { docker {...} }` |
+| 本地测试 | [`examples/docker-compose.yml`](../examples/docker-compose.yml) | `docker compose up` |
 
 ---
 

@@ -1,0 +1,48 @@
+# 腾讯云 CODING CI 配置（Docker 镜像版）
+# 云厂商无关，无需每次克隆工具仓库
+#
+# 使用方式：复制此文件到代码库根目录，重命名为 ci.yml
+#
+# 前置条件：
+# 1. 已将 code-review-assistant 镜像推送到腾讯云镜像仓库（如 TCR）
+# 2. 流水线已开启 MR 触发
+#
+# 变量说明：
+#   SEVERITY     - 门禁阈值: critical / high / medium / all
+#   SCAN_SECRET  - 是否扫描密钥: true / false
+#   SCAN_DEPS    - 是否扫描依赖漏洞: true / false
+#   SCAN_QUALITY - 是否执行代码质量检查: true / false
+
+version: "2.0"
+
+stages:
+  - code-review
+
+env:
+  SEVERITY: "${{SEVERITY:-high}}"
+  SCAN_SECRET: "${{SCAN_SECRET:-true}}"
+  SCAN_DEPS: "${{SCAN_DEPS:-true}}"
+  SCAN_QUALITY: "${{SCAN_QUALITY:-true}}"
+
+code-review-job:
+  stage: code-review
+  # 使用自定义镜像（需预先构建并推送到镜像仓库）
+  image: "ccr.ccs.tencentyun.com/your-namespace/code-review-assistant:latest"
+  rules:
+    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event'"
+    - if: "$CI_PIPELINE_SOURCE == 'web'"
+
+  script:
+    - echo "=========================================="
+    - echo "🤖 Code Review Assistant / 通用审查"
+    - echo "=========================================="
+    # 入口脚本已包含全部扫描阶段和质量门禁
+    - bash /opt/cra/docker-entrypoint.sh /workspace
+
+  artifacts:
+    paths:
+      - /tmp/cra-reports/report.md
+    expire_in: 7 days
+
+  # 门禁失败则阻断流水线
+  allow_failure: false

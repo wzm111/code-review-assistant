@@ -1,0 +1,63 @@
+# 阿里云效 Flow 流水线配置（Docker 镜像版）
+# 云厂商无关，无需每次克隆工具仓库
+#
+# 使用方式：复制此文件到代码库根目录，重命名为 .aliyun/pipelines.yml
+#
+# 前置条件：
+# 1. 已将 code-review-assistant 镜像推送到阿里云镜像仓库（如 ACR）
+# 2. 流水线已开启 MR（合并请求）触发
+#
+# 变量说明：
+#   SEVERITY     - 门禁阈值: critical / high / medium / all
+#   SCAN_SECRET  - 是否扫描密钥: true / false
+#   SCAN_DEPS    - 是否扫描依赖漏洞: true / false
+#   SCAN_QUALITY - 是否执行代码质量检查: true / false
+
+version: 1.0
+name: code-review-assistant-docker
+trigger:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+      - "release/*"
+  merge_request:
+    action:
+      - open
+      - update
+      - reopen
+
+env:
+  SEVERITY: "${SEVERITY:-high}"
+  SCAN_SECRET: "${SCAN_SECRET:-true}"
+  SCAN_DEPS: "${SCAN_DEPS:-true}"
+  SCAN_QUALITY: "${SCAN_QUALITY:-true}"
+
+stages:
+  review:
+    name: "代码审查"
+    jobs:
+      code-review:
+        name: "一键审查"
+        # 使用自定义镜像（需预先构建并推送到镜像仓库）
+        runsOn:
+          image: "registry.cn-hangzhou.aliyuncs.com/your-namespace/code-review-assistant:latest"
+        steps:
+          - checkout: self
+            with:
+              depth: 50
+
+          - script:
+              name: "执行代码审查"
+              script: |
+                # 入口脚本已包含密钥、依赖、质量扫描和门禁
+                # 失败会返回非 0，阻断流水线
+                bash /opt/cra/docker-entrypoint.sh /workspace
+
+          - script:
+              name: "归档报告"
+              script: |
+                # 将报告复制到阿里云效归档目录
+                mkdir -p /tmp/artifacts
+                cp /tmp/cra-reports/report.md /tmp/artifacts/code-review-report.md || true
