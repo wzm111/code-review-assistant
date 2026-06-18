@@ -1,10 +1,16 @@
 # Code Review Assistant / 代码审查助手
 
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+
 > English | [中文](#代码审查助手)
 
 A universal code review toolkit for AI agents. Detects your tech stack and applies language-specific rules on top of universal best practices. Works with Claude Code, Cursor, Claude Desktop (MCP), Windsurf, VS Code + Copilot, Kimi, Qode, Codex, and any AI that supports shell commands or MCP.
 
 **AI 通用代码审查工具包。自动检测技术栈，在通用最佳实践之上应用语言专项规则。支持 Claude Code、Cursor、Claude Desktop（MCP）、Windsurf、VS Code + Copilot、Kimi、Qode、Codex 及任何支持 shell 命令或 MCP 的 AI。**
+
+> 📌 当前版本：**v1.0.0**（见 [`VERSION`](VERSION)）  
+> 📋 完整规划：[ROADMAP.md](ROADMAP.md)  
+> 🚀 发布流程：[docs/release-process.md](docs/release-process.md)
 
 ## Quick Start / 快速开始
 
@@ -760,15 +766,12 @@ behavior:
 
 ## Roadmap / 路线图
 
-| 阶段 | 方向 | 目标 | 状态 |
-| ------ | ------ | ------ | ------ |
-| P1 | **端到端集成验证** | 用真实混合语言 PR 验证 `--summary`、`languages` 过滤、`.review-rules.yml` 注入是否真正生效 | ✅ 已完成 |
-| P1 | **规则 ID 规范化** | 给 `rules/*.md` 补全正式 `[id: 领域:规则名]` 标记，让 `disable` 可校验、可自动补全 | ✅ 已完成 |
-| P2 | **多云/云厂商无关的 CI 模板** | 提供 Dockerfile + entrypoint.sh，以及阿里云效、腾讯云 CODING、Jenkins 等通用接入示例 | ✅ 已完成 |
-| P2 | **`--fix` 自动应用补丁** | 从“AI 生成 patch 文本”升级为“脚本解析 diff 并可选自动应用” | 待开始 |
-| P3 | **审查报告结构化持久化** | 输出 JSON/SARIF 格式报告，保存历史，支持 `--history-compare` | 待开始 |
+完整路线图见 [ROADMAP.md](ROADMAP.md)。
 
-> 注：GitHub Actions 工作流暂不在路线图中，项目实际运行环境以阿里云、腾讯云等国内云厂商为主。
+当前剩余方向：
+
+- **P2** — `--fix` 自动应用补丁（待开始）
+- **P3** — 审查报告结构化持久化（待开始）
 
 ---
 
